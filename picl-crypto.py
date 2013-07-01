@@ -3,23 +3,25 @@
 from hashlib import sha256
 import hmac
 from hkdf import HKDF
+import itertools, binascii
 
 def HMAC(key, msg):
     return hmac.new(key, msg, sha256).digest()
 def printhex(name, value, groups_per_line=1):
-    h = value.encode("hex")
+    assert isinstance(value, bytes), type(value)
+    h = binascii.hexlify(value).decode("ascii")
     groups = [h[i:i+16] for i in range(0, len(h), 16)]
     lines = [" ".join(groups[i:i+groups_per_line])
              for i in range(0, len(groups), groups_per_line)]
-    print "%s:" % name
+    print("%s:" % name)
     for line in lines:
-        print line
-    print
+        print(line)
+    print()
 def split(value):
     assert len(value)%32 == 0
     return [value[i:i+32] for i in range(0, len(value), 32)]
 def KW(name):
-    return "identity.mozilla.com/picl/v1/%s" % (name,)
+    return bytes("identity.mozilla.com/picl/v1/%s" % (name,), "ascii")
 
 def xor(s1, s2):
     assert len(s1) == len(s2)
@@ -28,7 +30,7 @@ def xor(s1, s2):
 def fakeKey(start):
     return "".join([chr(c) for c in range(start, start+32)])
 
-print "== stretch-KDF"
+print("== stretch-KDF")
 emailUTF8 = u"andré@example.org".encode("utf-8")
 passwordUTF8 = u"pässwörd".encode("utf-8")
 printhex("email", emailUTF8)
@@ -46,7 +48,7 @@ printhex("masterKey", masterKey)
                                 dkLen=2*32))
 
 if 0:
-    print "== main-KDF"
+    print("== main-KDF")
     printhex("unwrapKey", unwrapKey)
     printhex("srpPW", srpPW)
 
@@ -55,25 +57,37 @@ wrapkB = fakeKey(2*32)
 signToken = fakeKey(3*32)
 resetToken = fakeKey(4*32)
 
-import _pysrp as srp
-# _pysrp is based on srp-1.0.2 (from PyPI), but patched to let us pass a
-# salt *into* the SRPverifier creation function, instead of creating its
-# own random salt.
-SRPparms = {"hash_alg": srp.SHA256, "ng_type": srp.NG_2048}
+import mysrp
 
-SALT = fakeKey(0*32)
-makeV = srp.create_salted_verification_key
-(srpSalt, srpVerifier) = makeV(emailUTF8, srpPW,
-                               forced_salt=SALT, **SRPparms)
-assert srpSalt == SALT
+# choose a salt that gives us a verifier with a leading zero
+def findSalt():
+    makeV = mysrp.create_verifier
+    prefix = b"\x00"+b"\x01"+b"\x00"*14
+    for count in itertools.count():
+        if count > 1000000:
+            raise ValueError("unable to find suitable salt in reasonable time")
+        print("===")
+        print(" count", count)
+        salt = prefix + binascii.unhexlify("%032x"%count)
+        (srpVerifier, v_num, x_str, x_num, _) = makeV(emailUTF8, srpPW, salt)
+        print(" v", binascii.hexlify(srpVerifier))
+        print(repr(srpVerifier[0]))
+        if srpVerifier[0] != 0x00:
+            continue
+        print(" x", binascii.hexlify(x_str))
+        print(" x_num=", x_num)
+        print(" v_num=", v_num)
+        return salt, srpVerifier, v_num
+
+srpSalt, srpVerifier, v_num = findSalt()
 
 if 1:
-    print "== SRP Verifier"
+    print("== SRP Verifier")
     printhex("srpSalt", srpSalt)
     printhex("srpVerifier", srpVerifier, groups_per_line=2)
 
-if 1:
-    print "== SRP dance"
+if 0:
+    print("== SRP dance")
     # note that the python implementation has the client/server interaction
     # hardwired the wrong way around: you must create the Verifier() object
     # with the client's A value, then later extract the server's SRP value.
@@ -104,7 +118,7 @@ if 1:
     printhex("srpK", srpK)
 
 if 0:
-    print "== getSignToken REQUEST"
+    print("== getSignToken REQUEST")
     #srpK = fakeKey(0)
 
     x = HKDF(SKM=srpK,
@@ -127,7 +141,7 @@ if 0:
     printhex("response", ciphertext+mac)
 
 if 0:
-    print "== signCertificate"
+    print("== signCertificate")
     tokenID,reqHMACkey = split(HKDF(SKM=signToken,
                                     XTS=None,
                                     dkLen=2*32,
@@ -137,7 +151,7 @@ if 0:
     printhex("reqHMACkey", reqHMACkey)
 
 if 0:
-    print "== resetAccount"
+    print("== resetAccount")
     SRPv = fakeKey(5*32)+fakeKey(6*32)
     plaintext = kA+wrapkB+SRPv
     keys = HKDF(SKM=resetToken,

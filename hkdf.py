@@ -1,12 +1,15 @@
 from hashlib import sha256, sha1
 import hmac
 
-def HKDF(SKM, dkLen, XTS=None, CTXinfo="", digest=sha256,
+def HKDF(SKM, dkLen, XTS=None, CTXinfo=b"", digest=sha256,
          _test_expected_PRK=None):
-    hlen = len(digest("").digest())
+    assert isinstance(SKM, bytes)
+    assert isinstance(XTS, (bytes,type(None)))
+    assert isinstance(CTXinfo, bytes)
+    hlen = len(digest(b"").digest())
     assert dkLen <= hlen*255
     if XTS is None:
-        XTS = "\x00"*hlen
+        XTS = b"\x00"*hlen
     # extract
     PRK = hmac.new(XTS, SKM, digest).digest()
     if _test_expected_PRK and _test_expected_PRK != PRK:
@@ -14,12 +17,12 @@ def HKDF(SKM, dkLen, XTS=None, CTXinfo="", digest=sha256,
     # expand
     blocks = []
     counter = 1
-    t = ""
+    t = b""
     while hlen*len(blocks) < dkLen:
-        t = hmac.new(PRK, t+CTXinfo+chr(counter), digest).digest()
+        t = hmac.new(PRK, t+CTXinfo+bytes([counter]), digest).digest()
         blocks.append(t)
         counter += 1
-    return "".join(blocks)[:dkLen]
+    return b"".join(blocks)[:dkLen]
 
 def power_on_self_test():
     from binascii import hexlify, unhexlify

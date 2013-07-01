@@ -22,6 +22,8 @@ import hashlib
 import os
 import binascii
 
+bytes = type(os.urandom(1))
+
 SHA1   = 0
 SHA224 = 1
 SHA256 = 2
@@ -153,25 +155,16 @@ def get_random( nbytes ):
     return bytes_to_long( os.urandom( nbytes ) )
 
     
-def old_H( hash_class, s1, s2 = '', s3=''):
-    if isinstance(s1, (long, int)):
-        s1 = long_to_bytes(s1)
-    if s2 and isinstance(s2, (long, int)):
-        s2 = long_to_bytes(s2)
-    if s3 and isinstance(s3, (long, int)):
-        s3 = long_to_bytes(s3)
-    s = s1 + s2 + s3
-    return long(hash_class(s).hexdigest(), 16)
     
-    
-def H( hash_class, *args, **kwargs ):
+def H( hash_class, *args ):
+    # bytestrings only
     h = hash_class()
     
     for s in args:
-        if s is not None:
-            h.update( long_to_bytes(s) if isinstance(s, (long, int)) else s )
+        assert isinstance(s, bytes)
+            h.update( s )
     hd = h.hexdigest()
-    print "HD", hd
+    #print "HD", hd
     return long( hd, 16 )
 
 
@@ -188,10 +181,9 @@ def HNxorg( hash_class, N, g ):
     
     
     
-def gen_x( hash_class, salt, username, password ):
-    x = H( hash_class, salt, H( hash_class, username + ':' + password ) )
-    print "x", x
-    return x
+def gen_x( hasher, salt, username, password ):
+    x_s = hasher(salt+hasher(username+":"+password).digest()).digest()
+    return x_s, bytes_to_long(x_s)
     
 
 def printdec(name, n):
@@ -213,15 +205,15 @@ def create_salted_verification_key( username, password, hash_alg=SHA1, ng_type=N
         _s = forced_salt
     else:
         _s = os.urandom(4)
-    v_num = pow(g,  gen_x( hash_class, _s, username, password ), N)
-    printdec("VERF.v_num", v_num)
+    x_s, x_num = gen_x( hash_class, _s, username, password )
+    v_num = pow(g,  x_num, N)
     _v = long_to_bytes( v_num )
     #print "VERF.s", _s.encode("hex")
     #print "VERF.I", username.encode("hex")
     #print "VERF.p", password.encode("hex")
     #print "VERF.x", gen_x(hash_class, _s, username, password)
     
-    return _s, _v
+    return _s, _v, x_num, v_num
     
 
     
@@ -259,7 +251,10 @@ class Verifier (object):
         
         N,g        = get_ng( ng_type, n_hex, g_hex )
         hash_class = _hash_map[ hash_alg ]
-        k          = H( hash_class, N, g )
+        # SRP-6a means k=H(PAD(N)+PAD(g))
+        # SRP-6 would be k=3
+        k          = bytes_to_long(hash_class(long_to_bytes(N)+
+                                              long_to_bytes(g)
         
         self.hash_class = hash_class
         self.N          = N
@@ -391,7 +386,7 @@ class User (object):
         if self.u == 0:
             return None
 
-        self.x = gen_x( hash_class, self.s, self.I, self.p )
+        x_s, self.x = gen_x( hash_class, self.s, self.I, self.p )
         
         self.v = pow(g, self.x, N)
         
@@ -408,9 +403,9 @@ class User (object):
         #print "c-x", self.x
         #print "c-k", k
         #print "c-v", self.v
-        #print "c-u", self.u
+        printdec("c-u", self.u)
         #print "c-s", self.s.encode("hex")
-        #print "c-S", self.S
+        printdec("c-S", self.S)
         #print "c-A", self.A
         #print "c-B", self.B
         #print "c-K", self.K.encode("hex")
