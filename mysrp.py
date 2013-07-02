@@ -46,7 +46,12 @@ def long_to_padded_bytes(l):
     s = "0"*(len(N_str)-len(s)) + s
     return binascii.unhexlify(s)
 
-def gen_x_str(salt, usernameUTF8, passwordUTF8):
+# SRP-6a defines 'k' to be H(N+g) (both padded, result as an int). SRP-6
+# merely sets k=3
+k_bytes = sha256(long_to_padded_bytes(N)+long_to_padded_bytes(g)).digest()
+k = bytes_to_long(k_bytes)
+
+def gen_x_bytes(salt, usernameUTF8, passwordUTF8):
     inner = sha256(usernameUTF8+b":"+passwordUTF8).digest()
     outer = sha256(salt+inner).digest()
     return outer
@@ -57,12 +62,85 @@ def create_verifier(usernameUTF8, passwordUTF8, salt=None):
     if not salt:
         salt = os.urandom(4)
     assert isinstance(salt, bytes)
-    x_str = gen_x_str(salt, usernameUTF8, passwordUTF8)
-    x_num = bytes_to_long(x_str)
-    print("g", g)
-    v_num = pow(g, x_num, N)
-    v_str = long_to_padded_bytes(v_num)
-    return (v_str, v_num, x_str, x_num, salt)
+    x_bytes = gen_x_bytes(salt, usernameUTF8, passwordUTF8)
+    x = bytes_to_long(x_bytes)
+    v = pow(g, x, N)
+    v_str = long_to_padded_bytes(v)
+    return (v_str, v, x_bytes, x, salt)
 
+class Client:
+    def __init__(self):
+        pass
+    def one(self, a=None):
+        if not a:
+            a = bytes_to_long(os.urandom(32)) # TODO: why 32?
+        assert isinstance(a, six.integer_types)
+        self.a = a
+        A = pow(g, self.a, N)
+        self.A_bytes = long_to_padded_bytes(A)
+        assert isinstance(self.A_bytes, six.binary_type)
+        return self.A_bytes
 
-    
+    def two(self, B_bytes, salt, usernameUTF8, passwordUTF8):
+        assert self.A_bytes, "must call Client.one() before Client.two()"
+        assert isinstance(B_bytes, six.binary_type)
+        B = bytes_to_long(B_bytes)
+        if B % N == 0:
+            raise ValueError("SRP-6a safety check failed: B is zero-ish")
+        u_bytes = sha256(self.A_bytes+B_bytes).digest()
+        u = bytes_to_long(u_bytes)
+        if u == 0:
+            raise ValueError("SRP-6a safety check failed: u is zero")
+        x_bytes = gen_x_bytes(salt, usernameUTF8, passwordUTF8)
+        x = bytes_to_long(x_bytes)
+        v = pow(g, x, N)
+        S = pow((B - k*v) % N,   (self.a + u*x),   N)
+        S_bytes = long_to_padded_bytes(S)
+        self.K = sha256(S_bytes).digest()
+        M1_bytes = sha256(self.A_bytes + B_bytes + S_bytes).digest()
+        self.expected_M2 = sha256(self.A_bytes + M1_bytes + S_bytes).digest()
+        return M1_bytes
+
+    def three(self, M2_bytes):
+        if M2_bytes != self.expected_M2:
+            raise ValueError("SRP error: received M2 does not match, server does not know our Verifier")
+
+    def get_key(self):
+        return self.K
+
+class Server:
+    def __init__(self, verifier):
+        assert isinstance(verifier, six.binary_type)
+        self.v = bytes_to_long(verifier)
+
+    def one(self, b=None):
+        if not b:
+            b = bytes_to_long(os.urandom(32)) # TODO: why 32?
+        assert isinstance(b, six.integer_types)
+        self.b = b
+
+        B = (3*self.v + pow(g, self.b, N)) % N
+        self.B_bytes = long_to_padded_bytes(B)
+        assert isinstance(self.B_bytes, six.binary_type)
+        return self.B_bytes
+
+    def two(self, A_bytes, M1_bytes):
+        A = bytes_to_long(A_bytes)
+        if A % N == 0:
+            raise ValueError("SRP-6a safety check failed: A is zero-ish")
+        u_bytes = sha256(A_bytes+self.B_bytes).digest()
+        u = bytes_to_long(u_bytes)
+        if u == 0:
+            raise ValueError("SRP-6a safety check failed: u is zero")
+        S = pow((A * pow(self.v, u, N)) % N, self.b, N)
+        S_bytes = long_to_padded_bytes(S)
+        expected_M1_bytes = sha256(A_bytes + self.B_bytes + S_bytes).digest()
+        if M1_bytes != expected_M1_bytes:
+            raise ValueError("SRP error: received M1 does not match, client does not know password")
+        # they know the password! yay!
+        self.K = sha256(S_bytes).digest()
+        M2 = sha256(A_bytes + M1_bytes + S_bytes).digest()
+        return M2 # client can optionally check this to test us
+
+    def get_key(self):
+        return self.K
