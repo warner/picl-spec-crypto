@@ -122,7 +122,7 @@ class Server:
         assert isinstance(b, six.integer_types)
         self.b = b
 
-        B = (3*self.v + pow(g, self.b, N)) % N
+        B = (k*self.v + pow(g, self.b, N)) % N
         self.B_bytes = long_to_padded_bytes(B)
         assert isinstance(self.B_bytes, six.binary_type)
         return self.B_bytes
@@ -152,13 +152,19 @@ def test():
     emailUTF8 = u"andré@example.org".encode("utf-8")
     passwordUTF8 = u"pässwörd".encode("utf-8")
     v,_,_,_,salt = create_verifier(emailUTF8, passwordUTF8)
-    c = Client()
+
     s = Server(v)
     B = s.one()
+
+    c = Client()
     A = c.one()
+
     M1 = c.two(B, salt, emailUTF8, passwordUTF8)
+
     M2 = s.two(A, M1)
+
     c.three(M2)
+
     assert c.get_key() == s.get_key()
     six.print_("test passed")
 
