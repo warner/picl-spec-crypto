@@ -170,3 +170,21 @@ def test():
 
 if __name__ == '__main__':
     test()
+
+# pysrp server makes M=H( (H(N)^H(g)) +H(I)+salt+A+B+K)
+# H_AMK = H(A+M+K)
+# client.process_challenge returns M
+# server.verify_session compares M, returns H_AMK
+# client.verify_session compares H_AMK
+#
+# so M/H_AMK are taking the role of M1/M2 in my code and the SRP6 paper. My
+# M1=H(A+B+S), so they're just being more thorough. Using K instead of S is
+# slightly safer, including I and the salt prevents a sort of mixed-message
+# attack. Why use HNxorHg instead of just including N and g?
+#
+# RFC2945 (the SRP3 one) does XORt. It also has a weird SHA_Interleave()
+# function to get from S to K.
+#
+# The SRP3 paper uses M1=H(A+B+K) and M2=H(A+M1+K). The SRP6 paper claims
+# that the SRP3 paper used M1=H(A+B+S) and M2=H(A+M1+S). Neither use XOR.
+# The wikipedia artcle uses XOR (as "one possible way").
