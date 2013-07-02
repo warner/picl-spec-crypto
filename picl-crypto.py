@@ -1,36 +1,38 @@
 # -*- coding: utf-8 -*-
+# this should work with both python2.7 and python3.3
 
 from hashlib import sha256
 import hmac
 from hkdf import HKDF
 import itertools, binascii
+from six import binary_type, print_, b, int2byte
 
 def HMAC(key, msg):
     return hmac.new(key, msg, sha256).digest()
 def printhex(name, value, groups_per_line=1):
-    assert isinstance(value, bytes), type(value)
+    assert isinstance(value, binary_type), type(value)
     h = binascii.hexlify(value).decode("ascii")
     groups = [h[i:i+16] for i in range(0, len(h), 16)]
     lines = [" ".join(groups[i:i+groups_per_line])
              for i in range(0, len(groups), groups_per_line)]
-    print("%s:" % name)
+    print_("%s:" % name)
     for line in lines:
-        print(line)
-    print()
+        print_(line)
+    print_()
 def split(value):
     assert len(value)%32 == 0
     return [value[i:i+32] for i in range(0, len(value), 32)]
 def KW(name):
-    return bytes("identity.mozilla.com/picl/v1/%s" % (name,), "ascii")
+    return b"identity.mozilla.com/picl/v1/" + b(name)
 
 def xor(s1, s2):
     assert len(s1) == len(s2)
-    return "".join([chr(ord(s1[i])^ord(s2[i])) for i in range(len(s1))])
+    return b"".join([int2byte(ord(s1[i])^ord(s2[i])) for i in range(len(s1))])
 
 def fakeKey(start):
-    return "".join([chr(c) for c in range(start, start+32)])
+    return b"".join([int2byte(c) for c in range(start, start+32)])
 
-print("== stretch-KDF")
+print_("== stretch-KDF")
 emailUTF8 = u"andré@example.org".encode("utf-8")
 passwordUTF8 = u"pässwörd".encode("utf-8")
 printhex("email", emailUTF8)
@@ -48,7 +50,7 @@ printhex("masterKey", masterKey)
                                 dkLen=2*32))
 
 if 0:
-    print("== main-KDF")
+    print_("== main-KDF")
     printhex("unwrapKey", unwrapKey)
     printhex("srpPW", srpPW)
 
@@ -59,35 +61,38 @@ resetToken = fakeKey(4*32)
 
 import mysrp
 
-# choose a salt that gives us a verifier with a leading zero
+# choose a salt that gives us a verifier with a leading zero, to ensure we
+# exercise padding behavior in implementations of this spec. Otherwise
+# padding bugs (dropping a leading zero) would hide in about 255 out of 256
+# test runs.
 def findSalt():
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\x01"+b"\x00"*14
     for count in itertools.count():
         if count > 1000000:
             raise ValueError("unable to find suitable salt in reasonable time")
-        print("===")
-        print(" count", count)
+        print_("===")
+        print_(" count", count)
         salt = prefix + binascii.unhexlify("%032x"%count)
         (srpVerifier, v_num, x_str, x_num, _) = makeV(emailUTF8, srpPW, salt)
-        print(" v", binascii.hexlify(srpVerifier))
-        print(repr(srpVerifier[0]))
-        if srpVerifier[0] != 0x00:
+        print_(" v", binascii.hexlify(srpVerifier))
+        print_(repr(srpVerifier[0]))
+        if srpVerifier[0:1] != b"\x00":
             continue
-        print(" x", binascii.hexlify(x_str))
-        print(" x_num=", x_num)
-        print(" v_num=", v_num)
+        print_(" x", binascii.hexlify(x_str))
+        print_(" x_num=", x_num)
+        print_(" v_num=", v_num)
         return salt, srpVerifier, v_num
 
 srpSalt, srpVerifier, v_num = findSalt()
 
 if 1:
-    print("== SRP Verifier")
+    print_("== SRP Verifier")
     printhex("srpSalt", srpSalt)
     printhex("srpVerifier", srpVerifier, groups_per_line=2)
 
 if 0:
-    print("== SRP dance")
+    print_("== SRP dance")
     # note that the python implementation has the client/server interaction
     # hardwired the wrong way around: you must create the Verifier() object
     # with the client's A value, then later extract the server's SRP value.
@@ -118,7 +123,7 @@ if 0:
     printhex("srpK", srpK)
 
 if 0:
-    print("== getSignToken REQUEST")
+    print_("== getSignToken REQUEST")
     #srpK = fakeKey(0)
 
     x = HKDF(SKM=srpK,
@@ -141,7 +146,7 @@ if 0:
     printhex("response", ciphertext+mac)
 
 if 0:
-    print("== signCertificate")
+    print_("== signCertificate")
     tokenID,reqHMACkey = split(HKDF(SKM=signToken,
                                     XTS=None,
                                     dkLen=2*32,
@@ -151,7 +156,7 @@ if 0:
     printhex("reqHMACkey", reqHMACkey)
 
 if 0:
-    print("== resetAccount")
+    print_("== resetAccount")
     SRPv = fakeKey(5*32)+fakeKey(6*32)
     plaintext = kA+wrapkB+SRPv
     keys = HKDF(SKM=resetToken,
