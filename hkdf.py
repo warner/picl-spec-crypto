@@ -1,5 +1,6 @@
 from hashlib import sha256, sha1
 import hmac
+import six
 
 def HKDF(SKM, dkLen, XTS=None, CTXinfo=b"", digest=sha256,
          _test_expected_PRK=None):
@@ -19,7 +20,7 @@ def HKDF(SKM, dkLen, XTS=None, CTXinfo=b"", digest=sha256,
     counter = 1
     t = b""
     while hlen*len(blocks) < dkLen:
-        t = hmac.new(PRK, t+CTXinfo+bytes([counter]), digest).digest()
+        t = hmac.new(PRK, t+CTXinfo+six.int2byte(counter), digest).digest()
         blocks.append(t)
         counter += 1
     return b"".join(blocks)[:dkLen]
