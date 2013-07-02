@@ -126,6 +126,7 @@ if 1:
     print_("== SRP A")
     a,A = findA()
     printhex("A", A, groups_per_line=2)
+    assert mysrp.Client().one(a) == A
 
 
 def findB():
@@ -152,15 +153,18 @@ if 1:
     print_("== SRP B")
     b,B = findB()
     printhex("B", B, groups_per_line=2)
+    assert mysrp.Server(srpVerifier).one(b) == B
 
 if 1:
     print_("== SRP dance")
     c = mysrp.Client()
     s = mysrp.Server(srpVerifier)
-    c.one(a)
-    M1 = c.two(B, srpSalt, emailUTF8, passwordUTF8)
+    Ax = c.one(a)
+    assert A==Ax
+    M1 = c.two(B, srpSalt, emailUTF8, srpPW)
     printhex("M1", M1)
-    s.one(b)
+    Bx = s.one(b)
+    assert Bx==B
     s.two(A,M1)
     assert c.get_key() == s.get_key()
     srpK = c.get_key()
