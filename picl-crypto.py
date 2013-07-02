@@ -74,6 +74,7 @@ import mysrp
 # padding bugs (dropping a leading zero) would hide in about 255 out of 256
 # test runs.
 def findSalt():
+    print_("looking for srpSalt that yields an srpVerifier with leading zero")
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
     for count in itertools.count():
@@ -86,10 +87,10 @@ def findSalt():
         (srpVerifier, v_num, x_str, x_num, _) = makeV(emailUTF8, srpPW, salt)
         if srpVerifier[0:1] != b"\x00":
             continue
-        print_("count", count)
+        print_("found salt on count", count)
         printdec(" x_num", x_num)
         print_(" x", binascii.hexlify(x_str))
-        print_(" v", binascii.hexlify(srpVerifier))
+        #print_(" v", binascii.hexlify(srpVerifier))
         printdec(" v_num", v_num)
         return salt, srpVerifier, v_num
 
@@ -100,35 +101,69 @@ if 1:
     printhex("srpSalt", srpSalt)
     printhex("srpVerifier", srpVerifier, groups_per_line=2)
 
-if 0:
+def findA():
+    print_("looking for 'a' that yields srpA with leading zero")
+    # 'a' is in [1..N-1], so 2048 bits, or 256 bytes
+    prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
+    c = mysrp.Client()
+    for count in itertools.count():
+        if count > 300 and count % 500 == 0:
+            print_(count, "tries")
+        if count > 1000000:
+            raise ValueError("unable to find suitable value in reasonable time")
+        a_str = prefix + binascii.unhexlify("%032x"%count)
+        assert len(a_str) == 2048/8, (len(a_str),2048/8)
+        a = mysrp.bytes_to_long(a_str)
+        A = c.one(a)
+        if A[0:1] != b"\x00":
+            continue
+        print_("found a on count", count)
+        printdec(" a_num", a)
+        printhex(" a_hex", a_str, groups_per_line=2)
+        return a,A
+
+if 1:
+    print_("== SRP A")
+    a,A = findA()
+    printhex("A", A, groups_per_line=2)
+
+
+def findB():
+    print_("looking for 'b' that yields srpA with leading zero")
+    prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
+    s = mysrp.Server(srpVerifier)
+    for count in itertools.count():
+        if count > 300 and count % 500 == 0:
+            print_(count, "tries")
+        if count > 1000000:
+            raise ValueError("unable to find suitable value in reasonable time")
+        b_str = prefix + binascii.unhexlify("%032x"%count)
+        assert len(b_str) == 2048/8, (len(b_str),2048/8)
+        b = mysrp.bytes_to_long(b_str)
+        B = s.one(b)
+        if B[0:1] != b"\x00":
+            continue
+        print_("found b on count", count)
+        printdec(" b_num", b)
+        printhex(" b_hex", b_str, groups_per_line=2)
+        return b,B
+
+if 1:
+    print_("== SRP B")
+    b,B = findB()
+    printhex("B", B, groups_per_line=2)
+
+if 1:
     print_("== SRP dance")
-    # note that the python implementation has the client/server interaction
-    # hardwired the wrong way around: you must create the Verifier() object
-    # with the client's A value, then later extract the server's SRP value.
-    # For PiCL, we have the server produce B first, then later the client
-    # supplies A.
-    force_a = fakeKey(0x03)
-    printhex("client internal 'a'", force_a)
-    c = srp.User(emailUTF8, srpPW, force_a=force_a, **SRPparms)
-    _I,srpA = c.start_authentication()
-    assert _I == emailUTF8
-    printhex("srpA", srpA, groups_per_line=2)
-    force_b = fakeKey(0x04)
-    printhex("server internal 'b'", force_b)
-    v = srp.Verifier(emailUTF8, srpSalt, srpVerifier, srpA, force_b=force_b,
-                     **SRPparms)
-    _s,srpB = v.get_challenge()
-    assert _s == srpSalt, (_s.encode("hex"), srpSalt.encode("hex"))
-    printhex("srpB", srpB, groups_per_line=2)
-    srpM1 = c.process_challenge(srpSalt,srpB)
-    printhex("srpM1", srpM1)
-    # PiCL ignores srpM2, and uses the session key instead
-    srpM2 = v.verify_session(srpM1)
-    c.verify_session(srpM2)
-    assert v.authenticated()
-    assert c.authenticated()
-    assert c.get_session_key() == v.get_session_key()
-    srpK = c.get_session_key()
+    c = mysrp.Client()
+    s = mysrp.Server(srpVerifier)
+    c.one(a)
+    M1 = c.two(B, srpSalt, emailUTF8, passwordUTF8)
+    printhex("M1", M1)
+    s.one(b)
+    s.two(A,M1)
+    assert c.get_key() == s.get_key()
+    srpK = c.get_key()
     printhex("srpK", srpK)
 
 if 0:

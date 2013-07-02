@@ -188,3 +188,8 @@ if __name__ == '__main__':
 # The SRP3 paper uses M1=H(A+B+K) and M2=H(A+M1+K). The SRP6 paper claims
 # that the SRP3 paper used M1=H(A+B+S) and M2=H(A+M1+S). Neither use XOR.
 # The wikipedia artcle uses XOR (as "one possible way").
+
+# decisions to make:
+#  M1=?
+#  is SHA256 ok?
+#  bias/range of a and b: use rand%N or rand(2*)%N or try-try-again?
