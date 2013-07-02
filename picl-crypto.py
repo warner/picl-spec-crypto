@@ -19,6 +19,14 @@ def printhex(name, value, groups_per_line=1):
     for line in lines:
         print_(line)
     print_()
+def printdec(name, n):
+    print_(name+" (base 10):")
+    s = str(n)
+    while len(s)%32:
+        s = " "+s
+    for i in range(0, len(s), 32):
+        print_(s[i:i+32])
+
 def split(value):
     assert len(value)%32 == 0
     return [value[i:i+32] for i in range(0, len(value), 32)]
@@ -67,21 +75,22 @@ import mysrp
 # test runs.
 def findSalt():
     makeV = mysrp.create_verifier
-    prefix = b"\x00"+b"\x01"+b"\x00"*14
+    prefix = b"\x00"+b"\xf1"+b"\x00"*14
     for count in itertools.count():
+        # about 500 per second
+        if count > 300 and count % 500 == 0:
+            print_(count, "tries")
         if count > 1000000:
             raise ValueError("unable to find suitable salt in reasonable time")
-        print_("===")
-        print_(" count", count)
         salt = prefix + binascii.unhexlify("%032x"%count)
         (srpVerifier, v_num, x_str, x_num, _) = makeV(emailUTF8, srpPW, salt)
-        print_(" v", binascii.hexlify(srpVerifier))
-        print_(repr(srpVerifier[0]))
         if srpVerifier[0:1] != b"\x00":
             continue
+        print_("count", count)
+        printdec(" x_num", x_num)
         print_(" x", binascii.hexlify(x_str))
-        print_(" x_num=", x_num)
-        print_(" v_num=", v_num)
+        print_(" v", binascii.hexlify(srpVerifier))
+        printdec(" v_num", v_num)
         return salt, srpVerifier, v_num
 
 srpSalt, srpVerifier, v_num = findSalt()
