@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # modified version of srp-1.0.2/srp/_pysrp.py (from PyPI):
 #  create_salted_verification_key() changed to accept optional salt string
 #  (instead of always creating a random one), and to tolerate leading
@@ -23,6 +25,7 @@
 from hashlib import sha256
 import os
 import binascii
+import six
 
 bytes = type(os.urandom(1))
 # 2048
@@ -144,3 +147,20 @@ class Server:
 
     def get_key(self):
         return self.K
+
+def test():
+    emailUTF8 = u"andré@example.org".encode("utf-8")
+    passwordUTF8 = u"pässwörd".encode("utf-8")
+    v,_,_,_,salt = create_verifier(emailUTF8, passwordUTF8)
+    c = Client()
+    s = Server(v)
+    B = s.one()
+    A = c.one()
+    M1 = c.two(B, salt, emailUTF8, passwordUTF8)
+    M2 = s.two(A, M1)
+    c.three(M2)
+    assert c.get_key() == s.get_key()
+    six.print_("test passed")
+
+if __name__ == '__main__':
+    test()
