@@ -5,6 +5,7 @@ from hashlib import sha256
 import hmac
 from hkdf import HKDF
 import itertools, binascii
+import six
 from six import binary_type, print_, b, int2byte
 import mysrp
 
@@ -32,11 +33,13 @@ def split(value):
     assert len(value)%32 == 0
     return [value[i:i+32] for i in range(0, len(value), 32)]
 def KW(name):
-    return b"identity.mozilla.com/picl/v1/" + b(name)
+    return b"identity.mozilla.com/picl/v1/" + six.b(name)
 
 def xor(s1, s2):
+    assert isinstance(s1, binary_type), type(s1)
+    assert isinstance(s2, binary_type), type(s2)
     assert len(s1) == len(s2)
-    return b"".join([int2byte(ord(s1[i])^ord(s2[i])) for i in range(len(s1))])
+    return b"".join([int2byte(ord(s1[i:i+1])^ord(s2[i:i+1])) for i in range(len(s1))])
 
 def fakeKey(start):
     return b"".join([int2byte(c) for c in range(start, start+32)])
@@ -187,7 +190,7 @@ if 1:
     srpK = c.get_key()
     printhex("srpK", srpK)
 
-if 0:
+if 1:
     print_("== getSignToken REQUEST")
     #srpK = fakeKey(0)
 
@@ -210,7 +213,7 @@ if 0:
     printhex("MAC", mac)
     printhex("response", ciphertext+mac)
 
-if 0:
+if 1:
     print_("== signCertificate")
     tokenID,reqHMACkey = split(HKDF(SKM=signToken,
                                     XTS=None,
@@ -220,10 +223,10 @@ if 0:
     printhex("tokenID", tokenID)
     printhex("reqHMACkey", reqHMACkey)
 
-if 0:
+if 1:
     print_("== resetAccount")
-    SRPv = fakeKey(5*32)+fakeKey(6*32)
-    plaintext = kA+wrapkB+SRPv
+    newSRPv = fakeKey(5*32)+fakeKey(6*32)
+    plaintext = kA+wrapkB+newSRPv
     keys = HKDF(SKM=resetToken,
                 XTS=None,
                 dkLen=2*32+len(plaintext),
