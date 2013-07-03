@@ -99,6 +99,7 @@ class Client:
         v = pow(g, x, N)
         S = pow((B - k*v) % N,   (self.a + u*x),   N)
         S_bytes = long_to_padded_bytes(S)
+        self._debug_S_bytes = S_bytes
         self.K = sha256(S_bytes).digest()
         M1_bytes = sha256(self.A_bytes + B_bytes + S_bytes).digest()
         self.expected_M2 = sha256(self.A_bytes + M1_bytes + S_bytes).digest()

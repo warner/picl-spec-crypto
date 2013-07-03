@@ -77,7 +77,8 @@ def findSalt():
     print_("looking for srpSalt that yields an srpVerifier with leading zero")
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
-    for count in itertools.count():
+    #for count in itertools.count():
+    for count in [155]:
         # about 500 per second
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
@@ -101,39 +102,12 @@ if 1:
     printhex("srpSalt", srpSalt)
     printhex("srpVerifier", srpVerifier, groups_per_line=2)
 
-def findA():
-    print_("looking for 'a' that yields srpA with leading zero")
-    # 'a' is in [1..N-1], so 2048 bits, or 256 bytes
-    prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
-    c = mysrp.Client()
-    for count in itertools.count():
-        if count > 300 and count % 500 == 0:
-            print_(count, "tries")
-        if count > 1000000:
-            raise ValueError("unable to find suitable value in reasonable time")
-        a_str = prefix + binascii.unhexlify("%032x"%count)
-        assert len(a_str) == 2048/8, (len(a_str),2048/8)
-        a = mysrp.bytes_to_long(a_str)
-        A = c.one(a)
-        if A[0:1] != b"\x00":
-            continue
-        print_("found a on count", count)
-        printdec(" a_num", a)
-        printhex(" a_hex", a_str, groups_per_line=2)
-        return a,A
-
-if 1:
-    print_("== SRP A")
-    a,A = findA()
-    printhex("A", A, groups_per_line=2)
-    assert mysrp.Client().one(a) == A
-
-
 def findB():
     print_("looking for 'b' that yields srpA with leading zero")
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
-    for count in itertools.count():
+    #for count in itertools.count():
+    for count in [32]:
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
         if count > 1000000:
@@ -155,6 +129,45 @@ if 1:
     printhex("B", B, groups_per_line=2)
     assert mysrp.Server(srpVerifier).one(b) == B
 
+def findA():
+    print_("looking for 'a' that yields srpA with leading zero")
+    # 'a' is in [1..N-1], so 2048 bits, or 256 bytes
+    prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
+    c = mysrp.Client()
+    import time
+    start = time.time()
+    #for count in itertools.count():
+    for count in [4444]:
+        # this processes about 50 per second. 2^16 needs about 20 minutes.
+        if count > 300 and count % 500 == 0:
+            now = time.time()
+            print_(count, "tries", now - start)
+            start = now
+        if count > 1000000:
+            raise ValueError("unable to find suitable value in reasonable time")
+        a_str = prefix + binascii.unhexlify("%032x"%count)
+        assert len(a_str) == 2048/8, (len(a_str),2048/8)
+        a = mysrp.bytes_to_long(a_str)
+        A = c.one(a)
+        if A[0:1] != b"\x00":
+            continue
+        # also require that the computed S has a leading zero
+        c.two(B, srpSalt, emailUTF8, srpPW)
+        if c._debug_S_bytes[0:1] != b"\x00":
+            print_("found good A, but not good S, on count", count)
+            continue
+        print_("found a on count", count)
+        printdec(" a_num", a)
+        printhex(" a_hex", a_str, groups_per_line=2)
+        return a,A
+
+if 1:
+    print_("== SRP A")
+    a,A = findA()
+    printhex("A", A, groups_per_line=2)
+    assert mysrp.Client().one(a) == A
+
+
 if 1:
     print_("== SRP dance")
     c = mysrp.Client()
@@ -162,11 +175,12 @@ if 1:
     Ax = c.one(a)
     assert A==Ax
     M1 = c.two(B, srpSalt, emailUTF8, srpPW)
-    printhex("M1", M1)
     Bx = s.one(b)
     assert Bx==B
     s.two(A,M1)
     assert c.get_key() == s.get_key()
+    printhex("S", c._debug_S_bytes, groups_per_line=2)
+    printhex("M1", M1)
     srpK = c.get_key()
     printhex("srpK", srpK)
 
