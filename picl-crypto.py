@@ -6,6 +6,7 @@ import hmac
 from hkdf import HKDF
 import itertools, binascii
 from six import binary_type, print_, b, int2byte
+import mysrp
 
 def HMAC(key, msg):
     return hmac.new(key, msg, sha256).digest()
@@ -40,6 +41,9 @@ def xor(s1, s2):
 def fakeKey(start):
     return b"".join([int2byte(c) for c in range(start, start+32)])
 
+print_("== SRP group")
+printdec("k", mysrp.k)
+
 print_("== stretch-KDF")
 emailUTF8 = u"andré@example.org".encode("utf-8")
 passwordUTF8 = u"pässwörd".encode("utf-8")
@@ -57,7 +61,7 @@ printhex("masterKey", masterKey)
                                 CTXinfo=KW("masterKey"),
                                 dkLen=2*32))
 
-if 0:
+if 1:
     print_("== main-KDF")
     printhex("unwrapKey", unwrapKey)
     printhex("srpPW", srpPW)
@@ -66,8 +70,6 @@ kA = fakeKey(1*32)
 wrapkB = fakeKey(2*32)
 signToken = fakeKey(3*32)
 resetToken = fakeKey(4*32)
-
-import mysrp
 
 # choose a salt that gives us a verifier with a leading zero, to ensure we
 # exercise padding behavior in implementations of this spec. Otherwise
@@ -179,6 +181,7 @@ if 1:
     assert Bx==B
     s.two(A,M1)
     assert c.get_key() == s.get_key()
+    printhex("u", c._debug_u_bytes, groups_per_line=2)
     printhex("S", c._debug_S_bytes, groups_per_line=2)
     printhex("M1", M1)
     srpK = c.get_key()

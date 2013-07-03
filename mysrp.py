@@ -94,6 +94,7 @@ class Client:
         u = bytes_to_long(u_bytes)
         if u == 0:
             raise ValueError("SRP-6a safety check failed: u is zero")
+        self._debug_u_bytes = u_bytes
         x_bytes = gen_x_bytes(salt, usernameUTF8, passwordUTF8)
         x = bytes_to_long(x_bytes)
         v = pow(g, x, N)
