@@ -4,10 +4,28 @@
 from hashlib import sha256
 import hmac
 from hkdf import HKDF
-import itertools, binascii
+import itertools, binascii, time, sys
 import six
 from six import binary_type, print_, b, int2byte
 import mysrp
+
+# get scrypt-0.6.1 from PyPI, run this with it in your PYTHONPATH
+# https://pypi.python.org/pypi/scrypt/0.6.1
+import scrypt
+
+# PyPI has four candidates for PBKDF2 functionality. We use "simple-pbkdf2"
+# by Armin Ronacher: https://pypi.python.org/pypi/simple-pbkdf2/1.0
+from pbkdf2 import pbkdf2_bin
+
+# other options:
+# * https://pypi.python.org/pypi/PBKDF/1.0
+#   most mature, but hardwired to use SHA1
+#
+# * https://pypi.python.org/pypi/pbkdf2/1.3
+#   doesn't work without pycrypto, since its hashlib fallback is buggy
+#
+# * https://pypi.python.org/pypi/pbkdf2.py/1.1
+#   also looks good, but ships in multiple files
 
 def HMAC(key, msg):
     return hmac.new(key, msg, sha256).digest()
@@ -53,10 +71,18 @@ passwordUTF8 = u"pässwörd".encode("utf-8")
 printhex("email", emailUTF8)
 printhex("password", passwordUTF8)
 
-masterKey = HKDF(SKM=passwordUTF8,
-                 XTS=emailUTF8,
-                 CTXinfo=KW("fakeStretch"),
-                 dkLen=1*32)
+# stretching
+time_start = time.time()
+k1 = pbkdf2_bin(passwordUTF8, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
+time_k1 = time.time()
+k2 = scrypt.hash(k1, "salt", N=128*1024, r=8, p=1, buflen=1*32)
+time_k2 = time.time()
+masterKey = pbkdf2_bin(k2, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
+time_k3 = time.time()
+print "stretching took %0.3f seconds (P=%0.3f + S=%0.3f + P=%0.3f)" % \
+      (time_k3-time_start,
+       time_k1-time_start, time_k2-time_k1, time_k3-time_k2)
+
 printhex("masterKey", masterKey)
 
 (unwrapKey, srpPW) = split(HKDF(SKM=masterKey,
@@ -83,7 +109,7 @@ def findSalt():
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
     #for count in itertools.count():
-    for count in [155]:
+    for count in [230]:
         # about 500 per second
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
@@ -112,7 +138,7 @@ def findB():
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
     #for count in itertools.count():
-    for count in [32]:
+    for count in [101]:
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
         if count > 1000000:
@@ -142,7 +168,7 @@ def findA():
     import time
     start = time.time()
     #for count in itertools.count():
-    for count in [4444]:
+    for count in [9081]:
         # this processes about 50 per second. 2^16 needs about 20 minutes.
         if count > 300 and count % 500 == 0:
             now = time.time()
