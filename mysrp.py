@@ -45,8 +45,7 @@ def bytes_to_long(b):
     return int(binascii.hexlify(b), 16)
 def long_to_padded_bytes(l):
     assert len(N_str)%2 == 0, N_str
-    s = "%x"%l
-    s = "0"*(len(N_str)-len(s)) + s
+    s = ("%x"%l).zfill(len(N_str))
     return binascii.unhexlify(s)
 
 # SRP-6a defines 'k' to be H(N+g) (both padded, result as an int). SRP-6
