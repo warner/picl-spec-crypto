@@ -257,7 +257,8 @@ if 1:
 if 1:
     print_("== resetAccount")
     newSRPv = fakeKey(5*32)+fakeKey(6*32)
-    plaintext = kA+wrapkB+newSRPv
+    newSRPsalt = fakeKey(7*32)
+    plaintext = kA+wrapkB+newSRPv+newSRPsalt
     keys = HKDF(SKM=resetToken,
                 XTS=None,
                 dkLen=2*32+len(plaintext),
