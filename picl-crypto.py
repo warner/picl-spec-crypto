@@ -14,7 +14,9 @@ import mysrp
 import scrypt
 
 # PyPI has four candidates for PBKDF2 functionality. We use "simple-pbkdf2"
-# by Armin Ronacher: https://pypi.python.org/pypi/simple-pbkdf2/1.0
+# by Armin Ronacher: https://pypi.python.org/pypi/simple-pbkdf2/1.0 . Note
+# that v1.0 has a bug which causes segfaults when num_iterations is greater
+# than about 88k.
 from pbkdf2 import pbkdf2_bin
 
 # other options:
@@ -77,7 +79,7 @@ k1 = pbkdf2_bin(passwordUTF8, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
 time_k1 = time.time()
 k2 = scrypt.hash(k1, "salt", N=128*1024, r=8, p=1, buflen=1*32)
 time_k2 = time.time()
-masterKey = pbkdf2_bin(k2, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
+masterKey = pbkdf2_bin(k2+passwordUTF8, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
 time_k3 = time.time()
 print "stretching took %0.3f seconds (P=%0.3f + S=%0.3f + P=%0.3f)" % \
       (time_k3-time_start,
@@ -109,7 +111,7 @@ def findSalt():
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
     #for count in itertools.count():
-    for count in [230]:
+    for count in [166]:
         # about 500 per second
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
@@ -138,7 +140,7 @@ def findB():
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
     #for count in itertools.count():
-    for count in [101]:
+    for count in [29]:
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
         if count > 1000000:
@@ -167,8 +169,9 @@ def findA():
     c = mysrp.Client()
     import time
     start = time.time()
+    num_near_misses = 0
     #for count in itertools.count():
-    for count in [9081]:
+    for count in [51164]:
         # this processes about 50 per second. 2^16 needs about 20 minutes.
         if count > 300 and count % 500 == 0:
             now = time.time()
@@ -182,10 +185,12 @@ def findA():
         A = c.one(a)
         if A[0:1] != b"\x00":
             continue
+        num_near_misses += 1
         # also require that the computed S has a leading zero
         c.two(B, srpSalt, emailUTF8, srpPW)
         if c._debug_S_bytes[0:1] != b"\x00":
-            print_("found good A, but not good S, on count", count)
+            print_("found good A, but not good S, on count %d (near misses=%d)"
+                   % (count, num_near_misses))
             continue
         print_("found a on count", count)
         printdec(" a_num", a)
