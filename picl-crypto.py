@@ -54,6 +54,8 @@ def split(value):
     return [value[i:i+32] for i in range(0, len(value), 32)]
 def KW(name):
     return b"identity.mozilla.com/picl/v1/" + six.b(name)
+def KWE(name, emailUTF8):
+    return b"identity.mozilla.com/picl/v1/" + six.b(name) + b":" + emailUTF8
 
 def xor(s1, s2):
     assert isinstance(s1, binary_type), type(s1)
@@ -75,11 +77,13 @@ printhex("password", passwordUTF8)
 
 # stretching
 time_start = time.time()
-k1 = pbkdf2_bin(passwordUTF8, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
+k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
+                20*1000, keylen=1*32, hashfunc=sha256)
 time_k1 = time.time()
-k2 = scrypt.hash(k1, "salt", N=128*1024, r=8, p=1, buflen=1*32)
+k2 = scrypt.hash(k1, "", N=64*1024, r=8, p=1, buflen=1*32)
 time_k2 = time.time()
-masterKey = pbkdf2_bin(k2+passwordUTF8, emailUTF8, 50*1000, keylen=1*32, hashfunc=sha256)
+masterKey = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
+                       20*1000, keylen=1*32, hashfunc=sha256)
 time_k3 = time.time()
 print "stretching took %0.3f seconds (P=%0.3f + S=%0.3f + P=%0.3f)" % \
       (time_k3-time_start,
@@ -111,7 +115,7 @@ def findSalt():
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
     #for count in itertools.count():
-    for count in [166]:
+    for count in [139]:
         # about 500 per second
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
@@ -140,7 +144,7 @@ def findB():
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
     #for count in itertools.count():
-    for count in [29]:
+    for count in [137]:
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
         if count > 1000000:
@@ -170,8 +174,10 @@ def findA():
     import time
     start = time.time()
     num_near_misses = 0
+    # hm.. this reports an awful lot of consecutive "near-misses". But, this
+    # a->A transformation isn't supposed to be strong against related "keys".
     #for count in itertools.count():
-    for count in [51164]:
+    for count in [27193]:
         # this processes about 50 per second. 2^16 needs about 20 minutes.
         if count > 300 and count % 500 == 0:
             now = time.time()
