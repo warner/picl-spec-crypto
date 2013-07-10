@@ -6,7 +6,7 @@ import hmac
 from hkdf import HKDF
 import itertools, binascii, time, sys
 import six
-from six import binary_type, print_, b, int2byte
+from six import binary_type, print_, int2byte
 import mysrp
 
 # get scrypt-0.6.1 from PyPI, run this with it in your PYTHONPATH
@@ -31,6 +31,10 @@ from pbkdf2 import pbkdf2_bin
 
 def HMAC(key, msg):
     return hmac.new(key, msg, sha256).digest()
+def printheader(name):
+    print_("== %s ==" % name)
+    print_()
+
 def printhex(name, value, groups_per_line=1):
     assert isinstance(value, binary_type), type(value)
     h = binascii.hexlify(value).decode("ascii")
@@ -47,7 +51,14 @@ def printdec(name, n):
     while len(s)%32:
         s = " "+s
     for i in range(0, len(s), 32):
-        print_(s[i:i+32])
+        print_(s[i:i+32].replace(" ",""))
+    print_()
+
+def thencount(*values):
+    for v in values:
+        yield v
+    for c in itertools.count():
+        yield c
 
 def split(value):
     assert len(value)%32 == 0
@@ -66,10 +77,7 @@ def xor(s1, s2):
 def fakeKey(start):
     return b"".join([int2byte(c) for c in range(start, start+32)])
 
-print_("== SRP group")
-printdec("k", mysrp.k)
-
-print_("== stretch-KDF")
+printheader("stretch-KDF")
 emailUTF8 = u"andré@example.org".encode("utf-8")
 passwordUTF8 = u"pässwörd".encode("utf-8")
 printhex("email", emailUTF8)
@@ -80,26 +88,30 @@ time_start = time.time()
 k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
                 20*1000, keylen=1*32, hashfunc=sha256)
 time_k1 = time.time()
-k2 = scrypt.hash(k1, "", N=64*1024, r=8, p=1, buflen=1*32)
+printhex("K1", k1)
+k2 = scrypt.hash(k1, KW("scrypt"), N=64*1024, r=8, p=1, buflen=1*32)
 time_k2 = time.time()
-masterKey = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
-                       20*1000, keylen=1*32, hashfunc=sha256)
+printhex("K2", k2)
+stretchedPW = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
+                         20*1000, keylen=1*32, hashfunc=sha256)
 time_k3 = time.time()
-print "stretching took %0.3f seconds (P=%0.3f + S=%0.3f + P=%0.3f)" % \
-      (time_k3-time_start,
-       time_k1-time_start, time_k2-time_k1, time_k3-time_k2)
+#print "stretching took %0.3f seconds (P=%0.3f + S=%0.3f + P=%0.3f)" % \
+#      (time_k3-time_start,
+#       time_k1-time_start, time_k2-time_k1, time_k3-time_k2)
 
-printhex("masterKey", masterKey)
+printhex("stretchedPW", stretchedPW)
+mainSalt = fakeKey(0)
 
-(unwrapKey, srpPW) = split(HKDF(SKM=masterKey,
-                                XTS=None,
-                                CTXinfo=KW("masterKey"),
-                                dkLen=2*32))
+(srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
+                                 XTS=mainSalt,
+                                 CTXinfo=KW("mainKDF"),
+                                 dkLen=2*32))
 
 if 1:
-    print_("== main-KDF")
-    printhex("unwrapKey", unwrapKey)
+    printheader("main-KDF")
+    printhex("mainSalt (normally random)", mainSalt)
     printhex("srpPW", srpPW)
+    printhex("unwrapBKey", unwrapBKey)
 
 kA = fakeKey(1*32)
 wrapkB = fakeKey(2*32)
@@ -114,8 +126,7 @@ def findSalt():
     print_("looking for srpSalt that yields an srpVerifier with leading zero")
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
-    #for count in itertools.count():
-    for count in [139]:
+    for count in thencount(112):
         # about 500 per second
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
@@ -126,25 +137,25 @@ def findSalt():
         if srpVerifier[0:1] != b"\x00":
             continue
         print_("found salt on count", count)
-        printdec(" x_num", x_num)
-        print_(" x", binascii.hexlify(x_str))
+        printdec("internal x", x_num)
+        printhex("internal x (hex)", x_str)
         #print_(" v", binascii.hexlify(srpVerifier))
-        printdec(" v_num", v_num)
+        printdec("v (verifier as number)", v_num)
         return salt, srpVerifier, v_num
 
 srpSalt, srpVerifier, v_num = findSalt()
 
 if 1:
-    print_("== SRP Verifier")
-    printhex("srpSalt", srpSalt)
+    printheader("SRP Verifier")
+    printdec("k", mysrp.k)
+    printhex("srpSalt (normally random)", srpSalt)
     printhex("srpVerifier", srpVerifier, groups_per_line=2)
 
 def findB():
     print_("looking for 'b' that yields srpA with leading zero")
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
-    #for count in itertools.count():
-    for count in [137]:
+    for count in thencount(5):
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
         if count > 1000000:
@@ -156,14 +167,14 @@ def findB():
         if B[0:1] != b"\x00":
             continue
         print_("found b on count", count)
-        printdec(" b_num", b)
-        printhex(" b_hex", b_str, groups_per_line=2)
+        printdec("private b (normally random)", b)
+        printhex("private b (hex)", b_str, groups_per_line=2)
         return b,B
 
 if 1:
-    print_("== SRP B")
+    printheader("SRP B")
     b,B = findB()
-    printhex("B", B, groups_per_line=2)
+    printhex("transmitted srpB", B, groups_per_line=2)
     assert mysrp.Server(srpVerifier).one(b) == B
 
 def findA():
@@ -176,8 +187,7 @@ def findA():
     num_near_misses = 0
     # hm.. this reports an awful lot of consecutive "near-misses". But, this
     # a->A transformation isn't supposed to be strong against related "keys".
-    #for count in itertools.count():
-    for count in [27193]:
+    for count in thencount(2599):
         # this processes about 50 per second. 2^16 needs about 20 minutes.
         if count > 300 and count % 500 == 0:
             now = time.time()
@@ -199,19 +209,19 @@ def findA():
                    % (count, num_near_misses))
             continue
         print_("found a on count", count)
-        printdec(" a_num", a)
-        printhex(" a_hex", a_str, groups_per_line=2)
+        printdec("private a (normally random)", a)
+        printhex("private a (hex)", a_str, groups_per_line=2)
         return a,A
 
 if 1:
-    print_("== SRP A")
+    printheader("SRP A")
     a,A = findA()
-    printhex("A", A, groups_per_line=2)
+    printhex("transmitted srpA", A, groups_per_line=2)
     assert mysrp.Client().one(a) == A
 
 
 if 1:
-    print_("== SRP dance")
+    printheader("SRP key-agreement")
     c = mysrp.Client()
     s = mysrp.Server(srpVerifier)
     Ax = c.one(a)
@@ -228,7 +238,7 @@ if 1:
     printhex("srpK", srpK)
 
 if 1:
-    print_("== getSignToken REQUEST")
+    printheader("getSignToken request")
     #srpK = fakeKey(0)
 
     x = HKDF(SKM=srpK,
@@ -251,7 +261,7 @@ if 1:
     printhex("response", ciphertext+mac)
 
 if 1:
-    print_("== signCertificate")
+    printheader("signCertificate")
     tokenID,reqHMACkey = split(HKDF(SKM=signToken,
                                     XTS=None,
                                     dkLen=2*32,
@@ -261,10 +271,10 @@ if 1:
     printhex("reqHMACkey", reqHMACkey)
 
 if 1:
-    print_("== resetAccount")
+    printheader("resetAccount")
     newSRPv = fakeKey(5*32)+fakeKey(6*32)
     newSRPsalt = fakeKey(7*32)
-    plaintext = kA+wrapkB+newSRPv+newSRPsalt
+    plaintext = wrapkB+newSRPv+newSRPsalt
     keys = HKDF(SKM=resetToken,
                 XTS=None,
                 dkLen=2*32+len(plaintext),
