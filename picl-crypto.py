@@ -100,7 +100,27 @@ time_k3 = time.time()
 #       time_k1-time_start, time_k2-time_k1, time_k3-time_k2)
 
 printhex("stretchedPW", stretchedPW)
-mainSalt = fakeKey(0)
+
+def findMainSalt(stretchedPW):
+    print_("looking for mainSalt that yields an srpPW with leading zero")
+    prefix = b"\x00"+b"\xf0"+b"\x00"*14
+    for count in thencount(845):
+        # about 20000 per second
+        if count > 300 and count % 500 == 0:
+            print_(count, "tries", time.time())
+        if count > 1000000:
+            raise ValueError("unable to find suitable salt in reasonable time")
+        mainSalt = prefix + binascii.unhexlify("%032x"%count)
+        (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
+                                         XTS=mainSalt,
+                                         CTXinfo=KW("mainKDF"),
+                                         dkLen=2*32))
+        if srpPW[0:1] != b"\x00":
+            continue
+        print_("found salt on count", count)
+        return mainSalt
+
+mainSalt = findMainSalt(stretchedPW)
 
 (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
                                  XTS=mainSalt,
@@ -115,8 +135,9 @@ if 1:
 
 kA = fakeKey(1*32)
 wrapkB = fakeKey(2*32)
-signToken = fakeKey(3*32)
-resetToken = fakeKey(4*32)
+keyFetchToken = fakeKey(3*32)
+sessionToken = fakeKey(4*32)
+accountResetToken = fakeKey(5*32)
 
 # choose a salt that gives us a verifier with a leading zero, to ensure we
 # exercise padding behavior in implementations of this spec. Otherwise
@@ -126,7 +147,7 @@ def findSalt():
     print_("looking for srpSalt that yields an srpVerifier with leading zero")
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
-    for count in thencount(112):
+    for count in thencount(377):
         # about 500 per second
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
@@ -155,7 +176,7 @@ def findB():
     print_("looking for 'b' that yields srpA with leading zero")
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
-    for count in thencount(5):
+    for count in thencount(15):
         if count > 300 and count % 500 == 0:
             print_(count, "tries")
         if count > 1000000:
@@ -187,7 +208,7 @@ def findA():
     num_near_misses = 0
     # hm.. this reports an awful lot of consecutive "near-misses". But, this
     # a->A transformation isn't supposed to be strong against related "keys".
-    for count in thencount(2599):
+    for count in thencount(54231):
         # this processes about 50 per second. 2^16 needs about 20 minutes.
         if count > 300 and count % 500 == 0:
             now = time.time()
@@ -238,20 +259,18 @@ if 1:
     printhex("srpK", srpK)
 
 if 1:
-    printheader("getSignToken request")
-    #srpK = fakeKey(0)
-
+    printheader("/session/auth")
     x = HKDF(SKM=srpK,
-             dkLen=(1+3)*32,
+             dkLen=3*32,
              XTS=None,
-             CTXinfo=KW("getSignToken"))
+             CTXinfo=KW("session/auth"))
     respHMACkey = x[0:32]
     respXORkey = x[32:]
     printhex("srpK", srpK)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
-    plaintext = kA+wrapkB+signToken
+    plaintext = keyFetchToken+sessionToken
     printhex("plaintext", plaintext)
 
     ciphertext = xor(plaintext, respXORkey)
@@ -261,32 +280,77 @@ if 1:
     printhex("response", ciphertext+mac)
 
 if 1:
-    printheader("signCertificate")
-    tokenID,reqHMACkey = split(HKDF(SKM=signToken,
+    printheader("/account/keys")
+    x = HKDF(SKM=keyFetchToken,
+             dkLen=(3+2)*32,
+             XTS=None,
+             CTXinfo=KW("account/keys"))
+    tokenID = x[0:32]
+    reqHMACkey = x[32:64]
+    respHMACkey = x[64:96]
+    respXORkey = x[96:]
+    printhex("keyFetchToken", keyFetchToken)
+    printhex("tokenID", tokenID)
+    printhex("reqHMACkey", reqHMACkey)
+    printhex("respHMACkey", respHMACkey)
+    printhex("respXORkey", respXORkey)
+
+    plaintext = kA+wrapkB
+    printhex("plaintext", plaintext)
+
+    ciphertext = xor(plaintext, respXORkey)
+    printhex("ciphertext", ciphertext)
+    mac = HMAC(respHMACkey, ciphertext)
+    printhex("MAC", mac)
+    printhex("response", ciphertext+mac)
+
+if 1:
+    printheader("use session (certificate/sign, etc)")
+    tokenID,reqHMACkey = split(HKDF(SKM=sessionToken,
                                     XTS=None,
                                     dkLen=2*32,
-                                    CTXinfo=KW("signCertificate")))
-    printhex("signToken", signToken)
+                                    CTXinfo=KW("session")))
+    printhex("sessionToken", sessionToken)
     printhex("tokenID", tokenID)
     printhex("reqHMACkey", reqHMACkey)
 
 if 1:
-    printheader("resetAccount")
-    newSRPv = fakeKey(5*32)+fakeKey(6*32)
-    newSRPsalt = fakeKey(7*32)
-    plaintext = wrapkB+newSRPv+newSRPsalt
-    keys = HKDF(SKM=resetToken,
+    printheader("password/change")
+    x = HKDF(SKM=srpK,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("password/change"))
+    respHMACkey = x[0:32]
+    respXORkey = x[32:]
+    printhex("srpK", srpK)
+    printhex("respHMACkey", respHMACkey)
+    printhex("respXORkey", respXORkey)
+
+    plaintext = keyFetchToken+accountResetToken
+    printhex("plaintext", plaintext)
+
+    ciphertext = xor(plaintext, respXORkey)
+    printhex("ciphertext", ciphertext)
+    mac = HMAC(respHMACkey, ciphertext)
+    printhex("MAC", mac)
+    printhex("response", ciphertext+mac)
+
+if 1:
+    printheader("account/reset")
+    newSRPv = "\x11"*(2048/8)
+    plaintext = wrapkB+newSRPv
+    keys = HKDF(SKM=accountResetToken,
                 XTS=None,
                 dkLen=2*32+len(plaintext),
-                CTXinfo=KW("resetAccount"))
+                CTXinfo=KW("account/reset"))
     tokenID = keys[0:32]
     reqHMACkey = keys[32:64]
     reqXORkey = keys[64:]
-    printhex("resetToken", resetToken)
+    printhex("accountResetToken", accountResetToken)
     printhex("tokenID", tokenID)
     printhex("reqHMACkey", reqHMACkey)
-    printhex("reqXORkey", reqXORkey)
-    printhex("plaintext", plaintext)
+    printhex("reqXORkey", reqXORkey, groups_per_line=2)
+    printhex("plaintext", plaintext, groups_per_line=2)
     ciphertext = xor(plaintext, reqXORkey)
-    printhex("ciphertext", ciphertext)
+    printhex("ciphertext", ciphertext, groups_per_line=2)
 
