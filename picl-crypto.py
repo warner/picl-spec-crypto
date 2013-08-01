@@ -400,11 +400,11 @@ if 1:
     printhex("ciphertext", ciphertext, groups_per_line=2)
 
 if 1:
-    printheader("/account/delete")
+    printheader("/account/destroy")
     x = HKDF(SKM=authToken,
              dkLen=2*32,
              XTS=None,
-             CTXinfo=KW("account/delete"))
+             CTXinfo=KW("account/destroy"))
     tokenID = x[0:32]
     reqHMACkey = x[32:64]
     printhex("authToken", authToken)
