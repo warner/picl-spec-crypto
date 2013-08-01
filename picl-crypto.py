@@ -135,9 +135,10 @@ if 1:
 
 kA = fakeKey(1*32)
 wrapkB = fakeKey(2*32)
-keyFetchToken = fakeKey(3*32)
-sessionToken = fakeKey(4*32)
-accountResetToken = fakeKey(5*32)
+authToken = fakeKey(3*32)
+keyFetchToken = fakeKey(4*32)
+sessionToken = fakeKey(5*32)
+accountResetToken = fakeKey(6*32)
 
 # choose a salt that gives us a verifier with a leading zero, to ensure we
 # exercise padding behavior in implementations of this spec. Otherwise
@@ -259,17 +260,45 @@ if 1:
     printhex("srpK", srpK)
 
 if 1:
-    printheader("/session/auth")
+    printheader("/auth")
     x = HKDF(SKM=srpK,
-             dkLen=3*32,
+             dkLen=2*32,
              XTS=None,
-             CTXinfo=KW("session/auth"))
+             CTXinfo=KW("auth/finish"))
     respHMACkey = x[0:32]
     respXORkey = x[32:]
     printhex("srpK", srpK)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
+    printhex("authToken", authToken)
+    plaintext = authToken
+    printhex("plaintext", plaintext)
+
+    ciphertext = xor(plaintext, respXORkey)
+    printhex("ciphertext", ciphertext)
+    mac = HMAC(respHMACkey, ciphertext)
+    printhex("MAC", mac)
+    printhex("response", ciphertext+mac)
+
+if 1:
+    printheader("/session")
+    x = HKDF(SKM=authToken,
+             dkLen=5*32,
+             XTS=None,
+             CTXinfo=KW("session/create"))
+    tokenID = x[0:32]
+    reqHMACkey = x[32:64]
+    respHMACkey = x[64:96]
+    respXORkey = x[96:]
+    printhex("authToken", authToken)
+    printhex("tokenID", tokenID)
+    printhex("reqHMACkey", reqHMACkey)
+    printhex("respHMACkey", respHMACkey)
+    printhex("respXORkey", respXORkey)
+
+    printhex("keyFetchToken", keyFetchToken)
+    printhex("sessionToken", sessionToken)
     plaintext = keyFetchToken+sessionToken
     printhex("plaintext", plaintext)
 
@@ -295,6 +324,8 @@ if 1:
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
+    printhex("kA", kA)
+    printhex("wrapkB", wrapkB)
     plaintext = kA+wrapkB
     printhex("plaintext", plaintext)
 
@@ -303,6 +334,12 @@ if 1:
     mac = HMAC(respHMACkey, ciphertext)
     printhex("MAC", mac)
     printhex("response", ciphertext+mac)
+
+    printhex("wrapkB", wrapkB)
+    printhex("unwrapBKey", unwrapBKey)
+    kB = xor(wrapkB, unwrapBKey)
+    printhex("kB", kB)
+
 
 if 1:
     printheader("use session (certificate/sign, etc)")
@@ -315,17 +352,23 @@ if 1:
     printhex("reqHMACkey", reqHMACkey)
 
 if 1:
-    printheader("password/change")
-    x = HKDF(SKM=srpK,
-             dkLen=3*32,
+    printheader("/password/change")
+    x = HKDF(SKM=authToken,
+             dkLen=5*32,
              XTS=None,
              CTXinfo=KW("password/change"))
-    respHMACkey = x[0:32]
-    respXORkey = x[32:]
-    printhex("srpK", srpK)
+    tokenID = x[0:32]
+    reqHMACkey = x[32:64]
+    respHMACkey = x[64:96]
+    respXORkey = x[96:]
+    printhex("authToken", authToken)
+    printhex("tokenID", tokenID)
+    printhex("reqHMACkey", reqHMACkey)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
+    printhex("keyFetchToken", keyFetchToken)
+    printhex("accountResetToken", accountResetToken)
     plaintext = keyFetchToken+accountResetToken
     printhex("plaintext", plaintext)
 
@@ -336,7 +379,7 @@ if 1:
     printhex("response", ciphertext+mac)
 
 if 1:
-    printheader("account/reset")
+    printheader("/account/reset")
     newSRPv = "\x11"*(2048/8)
     plaintext = wrapkB+newSRPv
     keys = HKDF(SKM=accountResetToken,
@@ -350,7 +393,20 @@ if 1:
     printhex("tokenID", tokenID)
     printhex("reqHMACkey", reqHMACkey)
     printhex("reqXORkey", reqXORkey, groups_per_line=2)
+    printhex("wrapkB", wrapkB)
+    printhex("newSRPv", newSRPv)
     printhex("plaintext", plaintext, groups_per_line=2)
     ciphertext = xor(plaintext, reqXORkey)
     printhex("ciphertext", ciphertext, groups_per_line=2)
 
+if 1:
+    printheader("/account/delete")
+    x = HKDF(SKM=authToken,
+             dkLen=2*32,
+             XTS=None,
+             CTXinfo=KW("account/delete"))
+    tokenID = x[0:32]
+    reqHMACkey = x[32:64]
+    printhex("authToken", authToken)
+    printhex("tokenID", tokenID)
+    printhex("reqHMACkey", reqHMACkey)
