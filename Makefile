@@ -5,7 +5,7 @@ venv:
 .deps: venv
 	venv/bin/pip install scrypt
 	venv/bin/pip install requests
-	venv/bin/pip install https://github.com/mozilla/PyHawk/archive/master.zip
+	venv/bin/pip install PyHawk
 	touch .deps
 .PHONY: deps
 deps: .deps
