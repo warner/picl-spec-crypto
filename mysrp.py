@@ -70,6 +70,9 @@ def create_verifier(usernameUTF8, passwordUTF8, salt=None):
     v_str = long_to_padded_bytes(v)
     return (v_str, v, x_bytes, x, salt)
 
+# if the server doesn't reject A%N==0 then attack is trivial
+exercise_validation_bug = False
+
 class Client:
     def __init__(self):
         pass
@@ -79,6 +82,8 @@ class Client:
         assert isinstance(a, six.integer_types)
         self.a = a
         A = pow(g, self.a, N)
+        if exercise_validation_bug:
+            A = 0
         self.A_bytes = long_to_padded_bytes(A)
         assert isinstance(self.A_bytes, six.binary_type)
         return self.A_bytes
@@ -98,6 +103,8 @@ class Client:
         x = bytes_to_long(x_bytes)
         v = pow(g, x, N)
         S = pow((B - k*v) % N,   (self.a + u*x),   N)
+        if exercise_validation_bug:
+            S = 0
         S_bytes = long_to_padded_bytes(S)
         self._debug_S_bytes = S_bytes
         self.K = sha256(S_bytes).digest()
