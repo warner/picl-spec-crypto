@@ -154,15 +154,15 @@ def main():
     if command == "create":
         mainKDFSalt = makeRandom()
         srpSalt = makeRandom()
+        PBKDF2_rounds_1 = PBKDF2_rounds_2 = 20*1000
+        scrypt_N = 64*1024
+        scrypt_r = 8
+        scrypt_p = 1
     else:
         r = POST("auth/start",
                  {"email": emailUTF8.encode("hex")
                   })
         print "auth/start", r
-        srpToken = r["srpToken"]
-        B = r["srp"]["B"].decode("hex")
-        srpSalt = r["srp"]["salt"].decode("hex")
-        # ignore stretch.rounds, srp.N_bits, srp.alg
         st = r["passwordStretching"]
         assert st["type"] == "PBKDF2/scrypt/PBKDF2/v1"
         mainKDFSalt = st["salt"].decode("hex")
@@ -172,18 +172,23 @@ def main():
         scrypt_r = st["scrypt_r"]
         scrypt_p = st["scrypt_p"]
 
+        srpToken = r["srpToken"]
+        srpSalt = r["srp"]["salt"].decode("hex")
+        B = r["srp"]["B"].decode("hex")
+
     printhex("mainKDFSalt", mainKDFSalt)
     printhex("srpSalt", srpSalt)
 
     k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
-                    20*1000, keylen=1*32, hashfunc=sha256)
+                    PBKDF2_rounds_1, keylen=1*32, hashfunc=sha256)
     time_k1 = time.time()
     printhex("K1", k1)
-    k2 = scrypt.hash(k1, KW("scrypt"), N=64*1024, r=8, p=1, buflen=1*32)
+    k2 = scrypt.hash(k1, KW("scrypt"),
+                     N=scrypt_N, r=scrypt_r, p=scrypt_p, buflen=1*32)
     time_k2 = time.time()
     printhex("K2", k2)
     stretchedPW = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
-                             20*1000, keylen=1*32, hashfunc=sha256)
+                             PBKDF2_rounds_2, keylen=1*32, hashfunc=sha256)
     printhex("stretchedPW", stretchedPW)
 
     (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
@@ -204,11 +209,11 @@ def main():
                     },
                   "passwordStretching": {
                       "type": "PBKDF2/scrypt/PBKDF2/v1",
-                      "PBKDF2_rounds_1": 20000,
-                      "scrypt_N": 64*1024,
-                      "scrypt_r": 8,
-                      "scrypt_p": 1,
-                      "PBKDF2_rounds_2": 20000,
+                      "PBKDF2_rounds_1": PBKDF2_rounds_1,
+                      "scrypt_N": scrypt_N,
+                      "scrypt_r": scrypt_r,
+                      "scrypt_p": scrypt_p,
+                      "PBKDF2_rounds_2": PBKDF2_rounds_2,
                       "salt": mainKDFSalt.encode("hex"),
                       },
                   })
