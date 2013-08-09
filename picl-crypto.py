@@ -88,10 +88,10 @@ time_start = time.time()
 k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
                 20*1000, keylen=1*32, hashfunc=sha256)
 time_k1 = time.time()
-printhex("K1", k1)
+printhex("K1 (scrypt input)", k1)
 k2 = scrypt.hash(k1, KW("scrypt"), N=64*1024, r=8, p=1, buflen=1*32)
 time_k2 = time.time()
-printhex("K2", k2)
+printhex("K2 (scrypt output)", k2)
 stretchedPW = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
                          20*1000, keylen=1*32, hashfunc=sha256)
 time_k3 = time.time()
@@ -282,18 +282,29 @@ if 1:
     printhex("response", ciphertext+mac)
 
 if 1:
-    printheader("/session")
+    printheader("authtoken")
     x = HKDF(SKM=authToken,
-             dkLen=5*32,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("authToken"))
+    authTokenID = x[0:32]
+    authreqHMACkey = x[32:64]
+    requestKey = x[64:96]
+    printhex("authToken", authToken)
+    printhex("tokenID (authToken)", authTokenID)
+    printhex("reqHMACkey", authreqHMACkey)
+    printhex("requestKey", requestKey)
+
+
+if 1:
+    printheader("/session")
+    x = HKDF(SKM=requestKey,
+             dkLen=3*32,
              XTS=None,
              CTXinfo=KW("session/create"))
-    tokenID = x[0:32]
-    reqHMACkey = x[32:64]
-    respHMACkey = x[64:96]
-    respXORkey = x[96:]
-    printhex("authToken", authToken)
-    printhex("tokenID", tokenID)
-    printhex("reqHMACkey", reqHMACkey)
+    respHMACkey = x[0:32]
+    respXORkey = x[32:]
+    printhex("requestKey", requestKey)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
@@ -319,7 +330,7 @@ if 1:
     respHMACkey = x[64:96]
     respXORkey = x[96:]
     printhex("keyFetchToken", keyFetchToken)
-    printhex("tokenID", tokenID)
+    printhex("tokenID (keyFetchToken)", tokenID)
     printhex("reqHMACkey", reqHMACkey)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
@@ -348,22 +359,18 @@ if 1:
                                     dkLen=2*32,
                                     CTXinfo=KW("session")))
     printhex("sessionToken", sessionToken)
-    printhex("tokenID", tokenID)
+    printhex("tokenID (sessionToken)", tokenID)
     printhex("reqHMACkey", reqHMACkey)
 
 if 1:
     printheader("/password/change")
-    x = HKDF(SKM=authToken,
-             dkLen=5*32,
+    x = HKDF(SKM=requestKey,
+             dkLen=3*32,
              XTS=None,
              CTXinfo=KW("password/change"))
-    tokenID = x[0:32]
-    reqHMACkey = x[32:64]
-    respHMACkey = x[64:96]
-    respXORkey = x[96:]
-    printhex("authToken", authToken)
-    printhex("tokenID", tokenID)
-    printhex("reqHMACkey", reqHMACkey)
+    respHMACkey = x[0:32]
+    respXORkey = x[32:]
+    printhex("requestKey", requestKey)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
@@ -390,7 +397,7 @@ if 1:
     reqHMACkey = keys[32:64]
     reqXORkey = keys[64:]
     printhex("accountResetToken", accountResetToken)
-    printhex("tokenID", tokenID)
+    printhex("tokenID (accountResetToken)", tokenID)
     printhex("reqHMACkey", reqHMACkey)
     printhex("reqXORkey", reqXORkey, groups_per_line=2)
     printhex("wrapkB", wrapkB)
@@ -401,12 +408,6 @@ if 1:
 
 if 1:
     printheader("/account/destroy")
-    x = HKDF(SKM=authToken,
-             dkLen=2*32,
-             XTS=None,
-             CTXinfo=KW("account/destroy"))
-    tokenID = x[0:32]
-    reqHMACkey = x[32:64]
     printhex("authToken", authToken)
-    printhex("tokenID", tokenID)
-    printhex("reqHMACkey", reqHMACkey)
+    printhex("tokenID (authToken)", authTokenID)
+    printhex("reqHMACkey", authreqHMACkey)
