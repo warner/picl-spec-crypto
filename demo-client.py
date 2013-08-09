@@ -4,7 +4,7 @@ import requests
 from hashlib import sha256
 import hmac
 from hkdf import HKDF
-import itertools, binascii, time, sys
+import binascii, time
 import six
 from six import binary_type, print_, int2byte
 import mysrp
@@ -86,14 +86,38 @@ def HAWK_GET(api, id, key):
     assert r.status_code == 200, (r, r.content)
     return r.json()
 
-def createSession(authToken):
+def HAWK_POST(api, id, key, body_object):
+    body = json.dumps(body_object)
+    creds = {"id": id.encode("hex"),
+             "key": key.encode("hex"), # TODO: this should not be encoded,
+                                       # the server has a bug that needs it
+             "algorithm": "sha256"
+             }
+    header = hawk_client.header(BASEURL+api, "POST", {"credentials": creds,
+                                                      "ext": "",
+                                                      "payload": body})
+    r = requests.post(BASEURL+api, headers={"authorization": header["field"]},
+                      data=body)
+    assert r.status_code == 200, (r, r.content)
+    return r.json()
+
+def processAuthToken(authToken):
     x = HKDF(SKM=authToken,
-             dkLen=5*32,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("authToken"))
+    tokenID, reqHMACkey, requestKey = split(x)
+    return tokenID, reqHMACkey, requestKey
+
+def createSession(authToken):
+    tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
+    x = HKDF(SKM=requestKey,
+             dkLen=3*32,
              XTS=None,
              CTXinfo=KW("session/create"))
-    tokenID, reqHMACkey, respHMACkey = split(x[:3*32])
-    respXORkey = x[3*32:]
-    r = HAWK_POST("session/create", tokenID, reqHMACkey)
+    respHMACkey = x[:32]
+    respXORkey = x[32:]
+    r = HAWK_POST("session/create", tokenID, reqHMACkey, {})
     bundle = r["bundle"].decode("hex")
     ct,respMAC = bundle[:-32], bundle[-32:]
     respMAC2 = HMAC(respHMACkey, ct)
@@ -125,6 +149,32 @@ def main():
     printhex("email", emailUTF8)
     printhex("password", passwordUTF8)
 
+    GET("__heartbeat__")
+
+    if command == "create":
+        mainKDFSalt = makeRandom()
+        srpSalt = makeRandom()
+    else:
+        r = POST("auth/start",
+                 {"email": emailUTF8.encode("hex")
+                  })
+        print "auth/start", r
+        srpToken = r["srpToken"]
+        B = r["srp"]["B"].decode("hex")
+        srpSalt = r["srp"]["salt"].decode("hex")
+        # ignore stretch.rounds, srp.N_bits, srp.alg
+        st = r["passwordStretching"]
+        assert st["type"] == "PBKDF2/scrypt/PBKDF2/v1"
+        mainKDFSalt = st["salt"].decode("hex")
+        PBKDF2_rounds_1 = st["PBKDF2_rounds_1"]
+        PBKDF2_rounds_2 = st["PBKDF2_rounds_2"]
+        scrypt_N = st["scrypt_N"]
+        scrypt_r = st["scrypt_r"]
+        scrypt_p = st["scrypt_p"]
+
+    printhex("mainKDFSalt", mainKDFSalt)
+    printhex("srpSalt", srpSalt)
+
     k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
                     20*1000, keylen=1*32, hashfunc=sha256)
     time_k1 = time.time()
@@ -136,26 +186,6 @@ def main():
                              20*1000, keylen=1*32, hashfunc=sha256)
     printhex("stretchedPW", stretchedPW)
 
-    GET("__heartbeat__")
-
-    if command == "create":
-        mainKDFSalt = makeRandom()
-        srpSalt = makeRandom()
-    else:
-        r = POST("session/auth/start",
-                 {"email": #emailUTF8.encode("hex")
-                  emailUTF8.encode("utf-8")
-                  })
-        print "auth/start", r
-        srpToken = r["srpToken"]
-        B = r["srp"]["B"].decode("hex")
-        srpSalt = r["srp"]["s"].decode("hex")
-        mainKDFSalt = r["stretch"]["salt"].decode("hex")
-        # ignore stretch.rounds, srp.N_bits, srp.alg
-
-    printhex("mainKDFSalt", mainKDFSalt)
-    printhex("srpSalt", srpSalt)
-
     (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
                                      XTS=mainKDFSalt,
                                      CTXinfo=KW("mainKDF"),
@@ -166,21 +196,28 @@ def main():
                                                           srpSalt)
 
         r = POST("account/create",
-                 {#"email": emailUTF8.encode("hex"), # TODO prefer hex
-                     "email": emailUTF8.encode("utf-8"),
-                  "verifier": srpVerifier.encode("hex"),
-                  "salt": srpSalt.encode("hex"),
-                  "params": {"srp": {"alg": "sha256", "N_bits": 2048},
-                             "stretch": {"salt": mainKDFSalt.encode("hex"),
-                                         "rounds": 20000}
-                             },
+                 {"email": emailUTF8.encode("hex"),
+                  "srp": {
+                      "type": "SRP-6a/SHA256/2048/v1",
+                      "verifier": srpVerifier.encode("hex"),
+                      "salt": srpSalt.encode("hex"),
+                    },
+                  "passwordStretching": {
+                      "type": "PBKDF2/scrypt/PBKDF2/v1",
+                      "PBKDF2_rounds_1": 20000,
+                      "scrypt_N": 64*1024,
+                      "scrypt_r": 8,
+                      "scrypt_p": 1,
+                      "PBKDF2_rounds_2": 20000,
+                      "salt": mainKDFSalt.encode("hex"),
+                      },
                   })
         print r
     else:
         srpClient = mysrp.Client()
         A = srpClient.one()
         M1 = srpClient.two(B, srpSalt, emailUTF8, srpPW)
-        r = POST("session/auth/finish",
+        r = POST("auth/finish",
                  {"srpToken": srpToken,
                   "A": A.encode("hex"),
                   "M": M1.encode("hex")})
@@ -188,40 +225,20 @@ def main():
         bundle = r["bundle"].decode("hex")
         print "bundlelen", len(bundle)
 
-        # note: the server is not yet using the new protocol. The old one
-        # returns keyFetchToken+sessionToken
-        if 1: # old protocol
-            x = HKDF(SKM=srpClient.get_key(),
-                     dkLen=3*32,
-                     XTS=None,
-                     CTXinfo=KW("session/auth"))
-            respHMACkey = x[0:32]
-            respXORkey = x[32:]
-            ct,respMAC = bundle[:-32], bundle[-32:]
-            respMAC2 = HMAC(respHMACkey, ct)
-            printhex("respHMACkey", respHMACkey)
-            printhex("respXORkey", respXORkey)
-            printhex("ct", ct)
-            assert respMAC2 == respMAC, (respMAC2.encode("hex"),
-                                         respMAC.encode("hex"))
-            keyFetchToken, sessionToken = split(xor(respXORkey,ct))
+        x = HKDF(SKM=srpClient.get_key(),
+                 dkLen=2*32,
+                 XTS=None,
+                 CTXinfo=KW("auth/finish"))
+        respHMACkey = x[0:32]
+        respXORkey = x[32:]
+        ct,respMAC = bundle[:-32], bundle[-32:]
+        respMAC2 = HMAC(respHMACkey, ct)
+        assert respMAC2 == respMAC, (respMAC2.encode("hex"),
+                                     respMAC.encode("hex"))
+        authToken = xor(ct, respXORkey)
+        printhex("authToken", authToken)
 
-        if 0: # new protocol
-            authToken = getAuthToken(srpClient.get_key())
-            x = HKDF(SKM=srpClient.get_key(),
-                     dkLen=2*32,
-                     XTS=None,
-                     CTXinfo=KW("auth/finish"))
-            respHMACkey = x[0:32]
-            respXORkey = x[32:]
-            ct,respMAC = bundle[:-32], bundle[-32:]
-            respMAC2 = HMAC(respHMACkey, ct)
-            assert respMAC2 == respMAC, (respMAC2.encode("hex"),
-                                         respMAC.encode("hex"))
-            authToken = xor(ct, respXORkey)
-            printhex("authToken", authToken)
-            keyFetchToken, sessionToken = createSession(authToken)
-
+        keyFetchToken, sessionToken = createSession(authToken)
         printhex("keyFetchToken", keyFetchToken)
         printhex("sessionToken", sessionToken)
 
