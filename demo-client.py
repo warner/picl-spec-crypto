@@ -143,8 +143,33 @@ def getKeys(keyFetchToken, unwrapBKey):
     kB = xor(unwrapBKey, wrapKB)
     return kA, kB
 
+def stretch(emailUTF8, passwordUTF8,
+            PBKDF2_rounds_1,
+            scrypt_N, scrypt_r, scrypt_p,
+            PBKDF2_rounds_2):
+    k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
+                    PBKDF2_rounds_1, keylen=1*32, hashfunc=sha256)
+    time_k1 = time.time()
+    printhex("K1", k1)
+    k2 = scrypt.hash(k1, KW("scrypt"),
+                     N=scrypt_N, r=scrypt_r, p=scrypt_p, buflen=1*32)
+    time_k2 = time.time()
+    printhex("K2", k2)
+    stretchedPW = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
+                             PBKDF2_rounds_2, keylen=1*32, hashfunc=sha256)
+    printhex("stretchedPW", stretchedPW)
+    return stretchedPW
+
+def mainKDF(stretchedPW, mainKDFSalt):
+    (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
+                                     XTS=mainKDFSalt,
+                                     CTXinfo=KW("mainKDF"),
+                                     dkLen=2*32))
+    return (srpPW, unwrapBKey)
+
 def main():
     emailUTF8, passwordUTF8, command = sys.argv[1:4]
+    assert command in ("create", "login", "changepw")
     assert isinstance(emailUTF8, binary_type)
     printhex("email", emailUTF8)
     printhex("password", passwordUTF8)
@@ -179,17 +204,8 @@ def main():
     printhex("mainKDFSalt", mainKDFSalt)
     printhex("srpSalt", srpSalt)
 
-    k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
-                    PBKDF2_rounds_1, keylen=1*32, hashfunc=sha256)
-    time_k1 = time.time()
-    printhex("K1", k1)
-    k2 = scrypt.hash(k1, KW("scrypt"),
-                     N=scrypt_N, r=scrypt_r, p=scrypt_p, buflen=1*32)
-    time_k2 = time.time()
-    printhex("K2", k2)
-    stretchedPW = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
-                             PBKDF2_rounds_2, keylen=1*32, hashfunc=sha256)
-    printhex("stretchedPW", stretchedPW)
+    stretchedPW = stretch(emailUTF8, passwordUTF8, PBKDF2_rounds_1,
+                          scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
 
     (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
                                      XTS=mainKDFSalt,
