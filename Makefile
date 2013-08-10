@@ -1,4 +1,11 @@
 
+help:
+	@echo "run: make venv deps"
+	@echo "then ./venv/bin/python demo-client.py email@example.org pw create"
+	@echo "then ./venv/bin/python demo-client.py email@example.org pw login"
+	@echo "then ./venv/bin/python demo-client.py email@example.org pw changepw newpw"
+	@echo "then ./venv/bin/python demo-client.py email@example.org newpw login"
+
 venv:
 	virtualenv venv
 
