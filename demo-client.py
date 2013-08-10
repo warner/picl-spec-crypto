@@ -189,12 +189,19 @@ def mainKDF(stretchedPW, mainKDFSalt):
 
 def main():
     emailUTF8, passwordUTF8, command = sys.argv[1:4]
-    assert command in ("create", "login", "changepw", "destroy")
+    assert command in ("create", "login", "changepw", "destroy",
+                       "forgotpw1", "forgotpw2")
     assert isinstance(emailUTF8, binary_type)
     printhex("email", emailUTF8)
     printhex("password", passwordUTF8)
 
     GET("__heartbeat__")
+
+    if command == "forgotpw1":
+        r = POST("password/forgot/send_code",
+                 {"email": emailUTF8.encode("hex")})
+        print r
+        return
 
     if command == "create":
         mainKDFSalt = makeRandom()
