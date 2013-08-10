@@ -207,10 +207,7 @@ def main():
     stretchedPW = stretch(emailUTF8, passwordUTF8, PBKDF2_rounds_1,
                           scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
 
-    (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
-                                     XTS=mainKDFSalt,
-                                     CTXinfo=KW("mainKDF"),
-                                     dkLen=2*32))
+    (srpPW, unwrapBKey) = mainKDF(stretchedPW, mainKDFSalt)
 
     if command == "create":
         (srpVerifier, _, _, _, _) = mysrp.create_verifier(emailUTF8, srpPW,
