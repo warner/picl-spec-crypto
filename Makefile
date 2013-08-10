@@ -5,6 +5,7 @@ help:
 	@echo "then ./venv/bin/python demo-client.py email@example.org pw login"
 	@echo "then ./venv/bin/python demo-client.py email@example.org pw changepw newpw"
 	@echo "then ./venv/bin/python demo-client.py email@example.org newpw login"
+	@echo "then ./venv/bin/python demo-client.py email@example.org newpw destroy"
 
 venv:
 	virtualenv venv
