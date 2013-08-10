@@ -93,10 +93,13 @@ def HAWK_POST(api, id, key, body_object):
                                        # the server has a bug that needs it
              "algorithm": "sha256"
              }
-    header = hawk_client.header(BASEURL+api, "POST", {"credentials": creds,
-                                                      "ext": "",
-                                                      "payload": body})
-    r = requests.post(BASEURL+api, headers={"authorization": header["field"]},
+    header = hawk_client.header(BASEURL+api, "POST",
+                                {"credentials": creds,
+                                 "ext": "",
+                                 "payload": body,
+                                 "contentType": "application/json"})
+    r = requests.post(BASEURL+api, headers={"authorization": header["field"],
+                                            "content-type": "application/json"},
                       data=body)
     assert r.status_code == 200, (r, r.content)
     return r.json()
