@@ -189,7 +189,7 @@ def mainKDF(stretchedPW, mainKDFSalt):
 
 def main():
     emailUTF8, passwordUTF8, command = sys.argv[1:4]
-    assert command in ("create", "login", "changepw")
+    assert command in ("create", "login", "changepw", "destroy")
     assert isinstance(emailUTF8, binary_type)
     printhex("email", emailUTF8)
     printhex("password", passwordUTF8)
@@ -203,7 +203,7 @@ def main():
         scrypt_N = 64*1024
         scrypt_r = 8
         scrypt_p = 1
-    elif command in ("login", "changepw"):
+    elif command in ("login", "changepw", "destroy"):
         r = POST("auth/start",
                  {"email": emailUTF8.encode("hex")
                   })
@@ -253,7 +253,7 @@ def main():
                       },
                   })
         print r
-    elif command in ("login", "changepw"):
+    elif command in ("login", "changepw", "destroy"):
         srpClient = mysrp.Client()
         A = srpClient.one()
         M1 = srpClient.two(B, srpSalt, emailUTF8, srpPW)
@@ -341,6 +341,11 @@ def main():
         r = HAWK_POST("account/reset", tokenID, reqHMACkey, payload)
         assert r == {}, r
         print "password changed"
+
+    if command == "destroy":
+        tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
+        r = HAWK_POST("account/destroy", tokenID, reqHMACkey, {})
+        print r
 
 if __name__ == '__main__':
     main()
