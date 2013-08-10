@@ -126,6 +126,23 @@ def createSession(authToken):
     keyFetchToken, sessionToken = split(xor(ct, respXORkey))
     return keyFetchToken, sessionToken
 
+def changePassword(authToken):
+    tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
+    x = HKDF(SKM=requestKey,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("password/change"))
+    respHMACkey = x[:32]
+    respXORkey = x[32:]
+    r = HAWK_POST("password/change/start", tokenID, reqHMACkey, {})
+    bundle = r["bundle"].decode("hex")
+    ct,respMAC = bundle[:-32], bundle[-32:]
+    respMAC2 = HMAC(respHMACkey, ct)
+    assert respMAC2 == respMAC, (respMAC2.encode("hex"),
+                                 respMAC.encode("hex"))
+    keyFetchToken, accountResetToken = split(xor(ct, respXORkey))
+    return keyFetchToken, accountResetToken
+
 def getKeys(keyFetchToken, unwrapBKey):
     x = HKDF(SKM=keyFetchToken,
              dkLen=5*32,
@@ -183,7 +200,7 @@ def main():
         scrypt_N = 64*1024
         scrypt_r = 8
         scrypt_p = 1
-    else:
+    elif command in ("login", "changepw"):
         r = POST("auth/start",
                  {"email": emailUTF8.encode("hex")
                   })
@@ -200,6 +217,8 @@ def main():
         srpToken = r["srpToken"]
         srpSalt = r["srp"]["salt"].decode("hex")
         B = r["srp"]["B"].decode("hex")
+    else:
+        assert False
 
     printhex("mainKDFSalt", mainKDFSalt)
     printhex("srpSalt", srpSalt)
@@ -231,7 +250,7 @@ def main():
                       },
                   })
         print r
-    else:
+    elif command in ("login", "changepw"):
         srpClient = mysrp.Client()
         A = srpClient.one()
         M1 = srpClient.two(B, srpSalt, emailUTF8, srpPW)
@@ -255,14 +274,70 @@ def main():
                                      respMAC.encode("hex"))
         authToken = xor(ct, respXORkey)
         printhex("authToken", authToken)
+    else:
+        assert False
 
+    if command == "login":
         keyFetchToken, sessionToken = createSession(authToken)
         printhex("keyFetchToken", keyFetchToken)
         printhex("sessionToken", sessionToken)
-
         kA,kB = getKeys(keyFetchToken, unwrapBKey)
         printhex("kA", kA)
         printhex("kB", kB)
+        # TODO: exercise /certificate/sign
+
+    if command == "changepw":
+        keyFetchToken, accountResetToken = changePassword(authToken)
+        printhex("keyFetchToken", keyFetchToken)
+        printhex("accountResetToken", accountResetToken)
+        kA,kB = getKeys(keyFetchToken, unwrapBKey)
+        printhex("kA", kA)
+        printhex("kB", kB)
+
+        # stretch new password
+        new_passwordUTF8 = sys.argv[4]
+        new_stretchedPW = stretch(emailUTF8, new_passwordUTF8, PBKDF2_rounds_1,
+                                  scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
+        new_mainKDFSalt = makeRandom()
+        new_srpSalt = makeRandom()
+        (new_srpPW, new_unwrapBKey) = mainKDF(new_stretchedPW, new_mainKDFSalt)
+        # build new srpVerifier
+        (new_srpVerifier, _,_,_,_) = mysrp.create_verifier(emailUTF8,
+                                                           new_srpPW,
+                                                           new_srpSalt)
+        assert len(new_srpVerifier) == 256, len(new_srpVerifier)
+        printhex("new_srpVerifier", new_srpVerifier)
+        # re-wrap kB
+        new_wrap_kB = xor(kB, new_unwrapBKey)
+        printhex("new_wrap_kB", new_wrap_kB)
+
+        # submit /account/reset
+        x = HKDF(SKM=accountResetToken,
+                 XTS="",
+                 CTXinfo=KW("account/reset"),
+                 dkLen=2*32+32+256)
+        tokenID = x[0:32]
+        reqHMACkey = x[32:64]
+        reqXORkey = x[64:]
+        bundle = xor(reqXORkey, new_wrap_kB+new_srpVerifier).encode("hex")
+        payload = {"bundle": bundle,
+                   "srp": {
+                       "type": "SRP-6a/SHA256/2048/v1",
+                       "salt": new_srpSalt.encode("hex"),
+                       },
+                   "passwordStretching": {
+                       "type": "PBKDF2/scrypt/PBKDF2/v1",
+                       "PBKDF2_rounds_1": PBKDF2_rounds_1,
+                       "scrypt_N": scrypt_N,
+                       "scrypt_r": scrypt_r,
+                       "scrypt_p": scrypt_p,
+                       "PBKDF2_rounds_2": PBKDF2_rounds_2,
+                       "salt": new_mainKDFSalt.encode("hex"),
+                       },
+                   }
+        r = HAWK_POST("account/reset", tokenID, reqHMACkey, payload)
+        assert r == {}, r
+        print "password changed"
 
 if __name__ == '__main__':
     main()
