@@ -144,7 +144,7 @@ accountResetToken = fakeKey(6*32)
 # exercise padding behavior in implementations of this spec. Otherwise
 # padding bugs (dropping a leading zero) would hide in about 255 out of 256
 # test runs.
-def findSalt():
+def findSalt_v0():
     print_("looking for srpSalt that yields an srpVerifier with leading zero")
     makeV = mysrp.create_verifier
     prefix = b"\x00"+b"\xf1"+b"\x00"*14
@@ -165,7 +165,7 @@ def findSalt():
         printdec("v (verifier as number)", v_num)
         return salt, srpVerifier, v_num
 
-srpSalt, srpVerifier, v_num = findSalt()
+srpSalt, srpVerifier, v_num = findSalt_v0()
 
 if 1:
     printheader("SRP Verifier")
@@ -173,8 +173,8 @@ if 1:
     printhex("srpSalt (normally random)", srpSalt)
     printhex("srpVerifier", srpVerifier, groups_per_line=2)
 
-def findB():
-    print_("looking for 'b' that yields srpA with leading zero")
+def findB_B0():
+    print_("looking for 'b' that yields srpB with leading zero")
     prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
     s = mysrp.Server(srpVerifier)
     for count in thencount(15):
@@ -195,11 +195,11 @@ def findB():
 
 if 1:
     printheader("SRP B")
-    b,B = findB()
+    b,B = findB_B0()
     printhex("transmitted srpB", B, groups_per_line=2)
     assert mysrp.Server(srpVerifier).one(b) == B
 
-def findA():
+def findA_A0():
     print_("looking for 'a' that yields srpA with leading zero")
     # 'a' is in [1..N-1], so 2048 bits, or 256 bytes
     prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
@@ -237,7 +237,7 @@ def findA():
 
 if 1:
     printheader("SRP A")
-    a,A = findA()
+    a,A = findA_A0()
     printhex("transmitted srpA", A, groups_per_line=2)
     assert mysrp.Client().one(a) == A
 
