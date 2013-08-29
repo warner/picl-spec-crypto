@@ -165,6 +165,27 @@ def findSalt_v0():
         printdec("v (verifier as number)", v_num)
         return salt, srpVerifier, v_num
 
+def findSalt_x0():
+    print_("looking for srpSalt that yields an 'x' with leading zero")
+    makeV = mysrp.create_verifier
+    prefix = b"\x00"+b"\xf1"+b"\x00"*14
+    for count in thencount():
+        # about 500 per second
+        if count > 300 and count % 500 == 0:
+            print_(count, "tries")
+        if count > 1000000:
+            raise ValueError("unable to find suitable salt in reasonable time")
+        salt = prefix + binascii.unhexlify("%032x"%count)
+        (srpVerifier, v_num, x_str, x_num, _) = makeV(emailUTF8, srpPW, salt)
+        if x_str[0:1] != b"\x00":
+            continue
+        print_("found salt on count", count)
+        printdec("internal x", x_num)
+        printhex("internal x (hex)", x_str)
+        #print_(" v", binascii.hexlify(srpVerifier))
+        printdec("v (verifier as number)", v_num)
+        return salt, srpVerifier, v_num
+
 srpSalt, srpVerifier, v_num = findSalt_v0()
 
 if 1:
@@ -192,6 +213,18 @@ def findB_B0():
         printdec("private b (normally random)", b)
         printhex("private b (hex)", b_str, groups_per_line=2)
         return b,B
+
+def findB_any():
+    prefix = b"\x00"+b"\xf3"+b"\x00"*(256-2-16)
+    s = mysrp.Server(srpVerifier)
+    count = 1
+    b_str = prefix + binascii.unhexlify("%032x"%count)
+    assert len(b_str) == 2048/8, (len(b_str),2048/8)
+    b = mysrp.bytes_to_long(b_str)
+    B = s.one(b)
+    printdec("private b (normally random)", b)
+    printhex("private b (hex)", b_str, groups_per_line=2)
+    return b,B
 
 if 1:
     printheader("SRP B")
@@ -229,6 +262,84 @@ def findA_A0():
         if c._debug_S_bytes[0:1] != b"\x00":
             print_("found good A, but not good S, on count %d (near misses=%d)"
                    % (count, num_near_misses))
+            continue
+        print_("found a on count", count)
+        printdec("private a (normally random)", a)
+        printhex("private a (hex)", a_str, groups_per_line=2)
+        return a,A
+
+def findA_u0():
+    prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
+    c = mysrp.Client()
+    import time
+    start = time.time()
+    num_near_misses = 0
+    for count in thencount():
+        if count > 300 and count % 500 == 0:
+            now = time.time()
+            print_(count, "tries", now - start)
+            start = now
+        if count > 1000000:
+            raise ValueError("unable to find suitable value in reasonable time")
+        a_str = prefix + binascii.unhexlify("%032x"%count)
+        assert len(a_str) == 2048/8, (len(a_str),2048/8)
+        a = mysrp.bytes_to_long(a_str)
+        A = c.one(a)
+        # require that the computed u has a leading zero
+        c.two(B, srpSalt, emailUTF8, srpPW)
+        if c._debug_u_bytes[0:1] != b"\x00":
+            continue
+        print_("found a on count", count)
+        printdec("private a (normally random)", a)
+        printhex("private a (hex)", a_str, groups_per_line=2)
+        return a,A
+
+def findA_k0():
+    prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
+    c = mysrp.Client()
+    import time
+    start = time.time()
+    num_near_misses = 0
+    for count in thencount():
+        if count > 300 and count % 500 == 0:
+            now = time.time()
+            print_(count, "tries", now - start)
+            start = now
+        if count > 1000000:
+            raise ValueError("unable to find suitable value in reasonable time")
+        a_str = prefix + binascii.unhexlify("%032x"%count)
+        assert len(a_str) == 2048/8, (len(a_str),2048/8)
+        a = mysrp.bytes_to_long(a_str)
+        A = c.one(a)
+        # require that the computed K has a leading zero
+        c.two(B, srpSalt, emailUTF8, srpPW)
+        if c.K[0:1] != b"\x00":
+            continue
+        print_("found a on count", count)
+        printdec("private a (normally random)", a)
+        printhex("private a (hex)", a_str, groups_per_line=2)
+        return a,A
+
+def findA_M0():
+    prefix = b"\x00"+b"\xf2"+b"\x00"*(256-2-16)
+    c = mysrp.Client()
+    import time
+    start = time.time()
+    num_near_misses = 0
+    for count in thencount():
+        if count > 300 and count % 500 == 0:
+            now = time.time()
+            print_(count, "tries", now - start)
+            start = now
+        if count > 1000000:
+            raise ValueError("unable to find suitable value in reasonable time")
+        a_str = prefix + binascii.unhexlify("%032x"%count)
+        assert len(a_str) == 2048/8, (len(a_str),2048/8)
+        a = mysrp.bytes_to_long(a_str)
+        A = c.one(a)
+        # require that the computed M1 has a leading zero
+        c.two(B, srpSalt, emailUTF8, srpPW)
+        if c._debug_M1_bytes[0:1] != b"\x00":
             continue
         print_("found a on count", count)
         printdec("private a (normally random)", a)

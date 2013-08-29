@@ -109,6 +109,7 @@ class Client:
         self._debug_S_bytes = S_bytes
         self.K = sha256(S_bytes).digest()
         M1_bytes = sha256(self.A_bytes + B_bytes + S_bytes).digest()
+        self._debug_M1_bytes = M1_bytes
         self.expected_M2 = sha256(self.A_bytes + M1_bytes + S_bytes).digest()
         return M1_bytes
 
