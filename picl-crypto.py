@@ -77,6 +77,17 @@ def xor(s1, s2):
 def fakeKey(start):
     return b"".join([int2byte(c) for c in range(start, start+32)])
 
+mode = "0-in-vABS"
+if len(sys.argv) > 1:
+    if sys.argv[1] == "u":
+        mode = "0-in-xu"
+    elif sys.argv[1] == "k":
+        mode = "0-in-xk"
+    elif sys.argv[1] == "M":
+        mode = "0-in-xM"
+    else:
+        raise ValueError("unknown mode '%s'" % sys.argv[1])
+
 printheader("stretch-KDF")
 emailUTF8 = u"andré@example.org".encode("utf-8")
 passwordUTF8 = u"pässwörd".encode("utf-8")
@@ -186,7 +197,12 @@ def findSalt_x0():
         printdec("v (verifier as number)", v_num)
         return salt, srpVerifier, v_num
 
-srpSalt, srpVerifier, v_num = findSalt_v0()
+if mode == "0-in-vABS":
+    srpSalt, srpVerifier, v_num = findSalt_v0()
+elif mode in ("0-in-xu", "0-in-xk", "0-in-xM"):
+    srpSalt, srpVerifier, v_num = findSalt_x0()
+else:
+    raise ValueError("unknown mode %s" % mode)
 
 if 1:
     printheader("SRP Verifier")
@@ -228,7 +244,10 @@ def findB_any():
 
 if 1:
     printheader("SRP B")
-    b,B = findB_B0()
+    if mode == "0-in-vABS":
+        b,B = findB_B0()
+    else:
+        b,B = findB_any()
     printhex("transmitted srpB", B, groups_per_line=2)
     assert mysrp.Server(srpVerifier).one(b) == B
 
@@ -348,7 +367,16 @@ def findA_M0():
 
 if 1:
     printheader("SRP A")
-    a,A = findA_A0()
+    if mode == "0-in-vABS":
+        a,A = findA_A0()
+    elif mode == "0-in-xu":
+        a,A = findA_u0()
+    elif mode == "0-in-xk":
+        a,A = findA_k0()
+    elif mode == "0-in-xM":
+        a,A = findA_M0()
+    else:
+        raise ValueError("unknown mode %s" % mode)
     printhex("transmitted srpA", A, groups_per_line=2)
     assert mysrp.Client().one(a) == A
 
@@ -369,6 +397,9 @@ if 1:
     printhex("M1", M1)
     srpK = c.get_key()
     printhex("srpK", srpK)
+
+if mode != "0-in-vABS":
+    sys.exit(0)
 
 if 1:
     printheader("/auth")
