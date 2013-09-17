@@ -36,9 +36,18 @@ def printheader(name):
     print_()
 
 def printhex(name, value, groups_per_line=1):
+    #print_("%s:" % name)
     assert isinstance(value, binary_type), type(value)
     h = binascii.hexlify(value).decode("ascii")
     groups = [h[i:i+16] for i in range(0, len(h), 16)]
+    if 0:
+        for i in range(0, len(groups), 4):
+            if i==0:
+                print_("' %s'" % " ".join(groups[i:i+4]))
+            else:
+                print_("       +'%s'" % " ".join(groups[i:i+4]))
+        print_()
+        return
     lines = [" ".join(groups[i:i+groups_per_line])
              for i in range(0, len(groups), groups_per_line)]
     print_("%s:" % name)
