@@ -464,16 +464,22 @@ if 1:
 if 1:
     printheader("/account/keys")
     x = HKDF(SKM=keyFetchToken,
-             dkLen=(3+2)*32,
+             dkLen=3*32,
              XTS=None,
-             CTXinfo=KW("account/keys"))
+             CTXinfo=KW("keyFetchToken"))
     tokenID = x[0:32]
     reqHMACkey = x[32:64]
-    respHMACkey = x[64:96]
-    respXORkey = x[96:]
+    keyRequestKey = x[64:96]
+    y = HKDF(SKM=keyRequestKey,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("account/keys"))
+    respHMACkey = y[0:32]
+    respXORkey = y[32:96]
     printhex("keyFetchToken", keyFetchToken)
     printhex("tokenID (keyFetchToken)", tokenID)
     printhex("reqHMACkey", reqHMACkey)
+    printhex("keyRequestKey", keyRequestKey)
     printhex("respHMACkey", respHMACkey)
     printhex("respXORkey", respXORkey)
 
