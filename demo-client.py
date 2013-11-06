@@ -194,6 +194,9 @@ def mainKDF(stretchedPW, mainKDFSalt):
                                      dkLen=2*32))
     return (srpPW, unwrapBKey)
 
+# https://github.com/mozilla/picl-gherkin/issues/33
+MANGLE = False
+
 def main():
     emailUTF8, passwordUTF8, command = sys.argv[1:4]
     assert command in ("create", "login", "changepw", "destroy",
@@ -240,15 +243,19 @@ def main():
     printhex("mainKDFSalt", mainKDFSalt)
     printhex("srpSalt", srpSalt)
 
-    stretchedPW = stretch(emailUTF8, passwordUTF8, PBKDF2_rounds_1,
+    # MANGLE
+    mangled_email = emailUTF8.encode("hex") if MANGLE else emailUTF8
+    stretchedPW = stretch(mangled_email, passwordUTF8, PBKDF2_rounds_1,
                           scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
 
     (srpPW, unwrapBKey) = mainKDF(stretchedPW, mainKDFSalt)
+    mangled_srpPW = srpPW.encode("hex") if MANGLE else srpPW
 
     if command == "create":
-        (srpVerifier, _, _, _, _) = mysrp.create_verifier(emailUTF8, srpPW,
-                                                          srpSalt)
 
+        (srpVerifier, _, _, _, _) = mysrp.create_verifier(mangled_email,
+                                                          mangled_srpPW,
+                                                          srpSalt)
         r = POST("account/create",
                  {"email": emailUTF8.encode("hex"),
                   "srp": {
@@ -270,7 +277,7 @@ def main():
     elif command in ("login", "changepw", "destroy"):
         srpClient = mysrp.Client()
         A = srpClient.one()
-        M1 = srpClient.two(B, srpSalt, emailUTF8, srpPW)
+        M1 = srpClient.two(B, srpSalt, mangled_email, mangled_srpPW)
         r = POST("auth/finish",
                  {"srpToken": srpToken,
                   "A": A.encode("hex"),
