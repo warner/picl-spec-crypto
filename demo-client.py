@@ -83,8 +83,7 @@ def HAWK_GET(api, id, key, versioned="v1/"):
     url = BASEURL+versioned+api
     print "HAWK_GET", url
     creds = {"id": id.encode("hex"),
-             "key": key.encode("hex"), # TODO: this should not be encoded,
-                                       # the server has a bug that needs it
+             "key": key,
              "algorithm": "sha256"
              }
     header = hawk_client.header(url, "GET", {"credentials": creds,
@@ -98,8 +97,7 @@ def HAWK_POST(api, id, key, body_object, versioned="v1/"):
     print "HAWK_POST", url
     body = json.dumps(body_object)
     creds = {"id": id.encode("hex"),
-             "key": key.encode("hex"), # TODO: this should not be encoded,
-                                       # the server has a bug that needs it
+             "key": key,
              "algorithm": "sha256"
              }
     header = hawk_client.header(url, "POST",
