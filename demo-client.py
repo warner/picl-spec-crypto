@@ -58,15 +58,20 @@ def xor(s1, s2):
     assert len(s1) == len(s2)
     return b"".join([int2byte(ord(s1[i:i+1])^ord(s2[i:i+1])) for i in range(len(s1))])
 
-BASEURL = "http://localhost:9000/"
+BASEURL = "http://127.0.0.1:9000/"
+#BASEURL = "https://idp.dev.lcip.org/"
 
-def GET(api):
-    r = requests.get(BASEURL+api)
+def GET(api, versioned="v1/"):
+    url = BASEURL+versioned+api
+    print "GET", url
+    r = requests.get(url)
     assert r.status_code == 200, (r, r.content)
     return r.json()
 
-def POST(api, body={}):
-    r = requests.post(BASEURL+api,
+def POST(api, body={}, versioned="v1/"):
+    url = BASEURL+versioned+api
+    print "POST", url
+    r = requests.post(url,
                       headers={"content-type": "application/json"},
                       data=json.dumps(body))
     assert r.status_code == 200, (r, r.content)
@@ -74,32 +79,36 @@ def POST(api, body={}):
 
 from hawk import client as hawk_client
 
-def HAWK_GET(api, id, key):
+def HAWK_GET(api, id, key, versioned="v1/"):
+    url = BASEURL+versioned+api
+    print "HAWK_GET", url
     creds = {"id": id.encode("hex"),
              "key": key.encode("hex"), # TODO: this should not be encoded,
                                        # the server has a bug that needs it
              "algorithm": "sha256"
              }
-    header = hawk_client.header(BASEURL+api, "GET", {"credentials": creds,
-                                                     "ext": ""})
-    r = requests.get(BASEURL+api, headers={"authorization": header["field"]})
+    header = hawk_client.header(url, "GET", {"credentials": creds,
+                                             "ext": ""})
+    r = requests.get(url, headers={"authorization": header["field"]})
     assert r.status_code == 200, (r, r.content)
     return r.json()
 
-def HAWK_POST(api, id, key, body_object):
+def HAWK_POST(api, id, key, body_object, versioned="v1/"):
+    url = BASEURL+versioned+api
+    print "HAWK_POST", url
     body = json.dumps(body_object)
     creds = {"id": id.encode("hex"),
              "key": key.encode("hex"), # TODO: this should not be encoded,
                                        # the server has a bug that needs it
              "algorithm": "sha256"
              }
-    header = hawk_client.header(BASEURL+api, "POST",
+    header = hawk_client.header(url, "POST",
                                 {"credentials": creds,
                                  "ext": "",
                                  "payload": body,
                                  "contentType": "application/json"})
-    r = requests.post(BASEURL+api, headers={"authorization": header["field"],
-                                            "content-type": "application/json"},
+    r = requests.post(url, headers={"authorization": header["field"],
+                                    "content-type": "application/json"},
                       data=body)
     assert r.status_code == 200, (r, r.content)
     return r.json()
@@ -195,7 +204,7 @@ def main():
     printhex("email", emailUTF8)
     printhex("password", passwordUTF8)
 
-    GET("__heartbeat__")
+    GET("__heartbeat__", versioned="")
 
     if command == "forgotpw1":
         r = POST("password/forgot/send_code",
