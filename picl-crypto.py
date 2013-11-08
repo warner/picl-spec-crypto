@@ -514,7 +514,7 @@ if 1:
     tokenID,reqHMACkey = split(HKDF(SKM=sessionToken,
                                     XTS=None,
                                     dkLen=2*32,
-                                    CTXinfo=KW("session")))
+                                    CTXinfo=KW("sessionToken")))
     printhex("sessionToken", sessionToken)
     printhex("tokenID (sessionToken)", tokenID)
     printhex("reqHMACkey", reqHMACkey)
@@ -546,16 +546,24 @@ if 1:
     printheader("/account/reset")
     newSRPv = "\x11"*(2048/8)
     plaintext = wrapkB+newSRPv
-    keys = HKDF(SKM=accountResetToken,
+    keys1 = HKDF(SKM=accountResetToken,
                 XTS=None,
-                dkLen=2*32+len(plaintext),
-                CTXinfo=KW("account/reset"))
-    tokenID = keys[0:32]
-    reqHMACkey = keys[32:64]
-    reqXORkey = keys[64:]
+                dkLen=3*32,
+                CTXinfo=KW("accountResetToken"))
+    tokenID = keys1[0:32]
+    reqHMACkey1 = keys1[32:64]
+    requestKey = keys1[64:]
     printhex("accountResetToken", accountResetToken)
     printhex("tokenID (accountResetToken)", tokenID)
-    printhex("reqHMACkey", reqHMACkey)
+    printhex("reqHMACkey (for HAWK)", reqHMACkey1)
+
+    keys2 = HKDF(SKM=requestKey,
+                 XTS=None,
+                 dkLen=32+len(plaintext),
+                 CTXinfo=KW("account/reset"))
+    reqHMACkey2 = keys2[0:32]
+    reqXORkey = keys2[32:]
+    printhex("reqHMACkey (for ciphertext)", reqHMACkey2)
     printhex("reqXORkey", reqXORkey, groups_per_line=2)
     printhex("wrapkB", wrapkB)
     printhex("newSRPv", newSRPv)
