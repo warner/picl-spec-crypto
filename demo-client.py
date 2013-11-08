@@ -155,11 +155,16 @@ def changePassword(authToken):
 
 def getKeys(keyFetchToken, unwrapBKey):
     x = HKDF(SKM=keyFetchToken,
-             dkLen=5*32,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("keyFetchToken"))
+    tokenID, reqHMACkey, keyRequestKey = split(x)
+    y = HKDF(SKM=keyRequestKey,
+             dkLen=32+2*32,
              XTS=None,
              CTXinfo=KW("account/keys"))
-    tokenID, reqHMACkey, respHMACkey = split(x[:3*32])
-    respXORkey = x[3*32:]
+    respHMACkey = y[:32]
+    respXORkey = y[32:]
     r = HAWK_GET("account/keys", tokenID, reqHMACkey)
     bundle = r["bundle"].decode("hex")
     ct,respMAC = bundle[:-32], bundle[-32:]
