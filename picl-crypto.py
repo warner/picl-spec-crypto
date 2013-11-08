@@ -547,9 +547,9 @@ if 1:
     newSRPv = "\x11"*(2048/8)
     plaintext = wrapkB+newSRPv
     keys1 = HKDF(SKM=accountResetToken,
-                XTS=None,
-                dkLen=3*32,
-                CTXinfo=KW("accountResetToken"))
+                 XTS=None,
+                 dkLen=3*32,
+                 CTXinfo=KW("accountResetToken"))
     tokenID = keys1[0:32]
     reqHMACkey1 = keys1[32:64]
     requestKey = keys1[64:]

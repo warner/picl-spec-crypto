@@ -342,14 +342,21 @@ def main():
 
         # submit /account/reset
         x = HKDF(SKM=accountResetToken,
-                 XTS="",
+                 XTS=None,
+                 CTXinfo=KW("accountResetToken"),
+                 dkLen=3*32)
+        tokenID, reqHMACkey1, requestKey = split(x)
+        plaintext = new_wrap_kB+new_srpVerifier
+        print "LEN PLAIN", len(plaintext)
+        y = HKDF(SKM=requestKey,
+                 XTS=None,
                  CTXinfo=KW("account/reset"),
-                 dkLen=2*32+32+256)
-        tokenID = x[0:32]
-        reqHMACkey = x[32:64]
-        reqXORkey = x[64:]
-        bundle = xor(reqXORkey, new_wrap_kB+new_srpVerifier).encode("hex")
-        payload = {"bundle": bundle,
+                 dkLen=32+len(plaintext))
+        reqHMACkey2 = y[:32]
+        reqXORkey = y[32:]
+        bundle = xor(reqXORkey, plaintext)
+        bundle_mac = HMAC(reqHMACkey2, bundle)
+        payload = {"bundle": (bundle+bundle_mac).encode("hex"),
                    "srp": {
                        "type": "SRP-6a/SHA256/2048/v1",
                        "salt": new_srpSalt.encode("hex"),
@@ -364,7 +371,7 @@ def main():
                        "salt": new_mainKDFSalt.encode("hex"),
                        },
                    }
-        r = HAWK_POST("account/reset", tokenID, reqHMACkey, payload)
+        r = HAWK_POST("account/reset", tokenID, reqHMACkey1, payload)
         assert r == {}, r
         print "password changed"
 
