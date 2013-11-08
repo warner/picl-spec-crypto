@@ -136,6 +136,18 @@ def createSession(authToken):
     keyFetchToken, sessionToken = split(xor(ct, respXORkey))
     return keyFetchToken, sessionToken
 
+def processSessionToken(sessionToken):
+    x = HKDF(SKM=sessionToken,
+             dkLen=3*32,
+             XTS=None,
+             CTXinfo=KW("sessionToken"))
+    tokenID, reqHMACkey, requestKey = split(x)
+    return tokenID, reqHMACkey, requestKey
+
+def getEmailStatus(sessionToken):
+    tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
+    return HAWK_GET("recovery_email/status", tokenID, reqHMACkey)
+
 def changePassword(authToken):
     tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
     x = HKDF(SKM=requestKey,
@@ -310,6 +322,8 @@ def main():
         keyFetchToken, sessionToken = createSession(authToken)
         printhex("keyFetchToken", keyFetchToken)
         printhex("sessionToken", sessionToken)
+        email_status = getEmailStatus(sessionToken)
+        print "email status:", email_status
         kA,kB = getKeys(keyFetchToken, unwrapBKey)
         printhex("kA", kA)
         printhex("kB", kB)
