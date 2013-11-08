@@ -556,6 +556,7 @@ if 1:
     printhex("accountResetToken", accountResetToken)
     printhex("tokenID (accountResetToken)", tokenID)
     printhex("reqHMACkey (for HAWK)", reqHMACkey1)
+    printhex("requestKey", requestKey)
 
     keys2 = HKDF(SKM=requestKey,
                  XTS=None,
@@ -570,6 +571,9 @@ if 1:
     printhex("plaintext", plaintext, groups_per_line=2)
     ciphertext = xor(plaintext, reqXORkey)
     printhex("ciphertext", ciphertext, groups_per_line=2)
+    mac = HMAC(reqHMACkey2, ciphertext)
+    printhex("MAC", mac)
+    printhex("response", ciphertext+mac, groups_per_line=2)
 
 if 1:
     printheader("/account/destroy")
