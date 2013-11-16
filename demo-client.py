@@ -369,8 +369,8 @@ def main():
         header, payload = dumpCert(cert)
         assert header["alg"] == "RS256"
         # MANGLED
-        #assert payload["principal"]["email"] == mangled_email
-        assert payload["principal"]["email"] == mangled_email.encode("hex")
+        assert payload["principal"]["email"] == mangled_email
+        #assert payload["principal"]["email"] == mangled_email.encode("hex")
         # exercise /session/destroy
         print "destroying session now"
         print destroySession(sessionToken)
