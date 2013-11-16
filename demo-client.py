@@ -243,6 +243,25 @@ def destroySession(sessionToken):
     tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
     return HAWK_POST("session/destroy", tokenID, reqHMACkey, {})
 
+def processForgotPasswordToken(forgotPasswordToken):
+    x = HKDF(SKM=forgotPasswordToken,
+             dkLen=2*32,
+             XTS=None,
+             CTXinfo=KW("forgotPasswordToken")) # XXX: ???
+    # not listed in KeyServerProtocol document
+    tokenID, reqHMACkey = split(x)
+    return tokenID, reqHMACkey
+
+def resendForgotPassword(forgotPasswordToken, emailUTF8):
+    tokenID, reqHMACkey = processForgotPasswordToken(forgotPasswordToken)
+    return HAWK_POST("password/forgot/resend_code", tokenID, reqHMACkey,
+                     {"email": emailUTF8.encode("hex")})
+
+def verifyForgotPassword(forgotPasswordToken, code):
+    tokenID, reqHMACkey = processForgotPasswordToken(forgotPasswordToken)
+    r = HAWK_POST("password/forgot/verify_code", tokenID, reqHMACkey,
+                  {"code": code})
+    return r["accountResetToken"]
 
 # https://github.com/mozilla/picl-gherkin/issues/33
 MANGLE = False
@@ -250,7 +269,7 @@ MANGLE = False
 def main():
     emailUTF8, passwordUTF8, command = sys.argv[1:4]
     assert command in ("create", "login", "changepw", "destroy",
-                       "forgotpw1", "forgotpw2")
+                       "forgotpw1", "forgotpw2", "forgotpw3")
     assert isinstance(emailUTF8, binary_type)
     printhex("email", emailUTF8)
     printhex("password", passwordUTF8)
@@ -261,7 +280,19 @@ def main():
         r = POST("password/forgot/send_code",
                  {"email": emailUTF8.encode("hex")})
         print r
+        forgotPasswordToken = r["forgotPasswordToken"]
         return
+
+    if command == "forgotpw2":
+        forgotPasswordToken = sys.argv[4]
+        r = resendForgotPassword(forgotPasswordToken, emailUTF8)
+        print r
+        return
+
+    if command == "forgotpw3":
+        forgotPasswordToken, code, new_passwordUTF8 = sys.argv[4:7]
+        accountResetToken = verifyForgotPassword(forgotPasswordToken, code)
+        kA,kB = None, None
 
     if command == "create":
         mainKDFSalt = makeRandom()
@@ -393,9 +424,10 @@ def main():
         kA,kB = getKeys(keyFetchToken, unwrapBKey)
         printhex("kA", kA)
         printhex("kB", kB)
-
-        # stretch new password
         new_passwordUTF8 = sys.argv[4]
+
+    if command in ("changepw", "forgotpw3"):
+        # stretch new password
         new_stretchedPW = stretch(emailUTF8, new_passwordUTF8, PBKDF2_rounds_1,
                                   scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
         new_mainKDFSalt = makeRandom()
@@ -407,9 +439,12 @@ def main():
                                                            new_srpSalt)
         assert len(new_srpVerifier) == 256, len(new_srpVerifier)
         printhex("new_srpVerifier", new_srpVerifier)
-        # re-wrap kB
-        new_wrap_kB = xor(kB, new_unwrapBKey)
-        printhex("new_wrap_kB", new_wrap_kB)
+        if kB:
+            # re-wrap kB
+            new_wrap_kB = xor(kB, new_unwrapBKey)
+            printhex("new_wrap_kB", new_wrap_kB)
+        else:
+            new_wrap_kB = "\x00"*len(new_unwrapBKey)
 
         # submit /account/reset
         x = HKDF(SKM=accountResetToken,
