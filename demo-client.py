@@ -1,5 +1,5 @@
 
-import os, sys, json
+import os, sys, json, base64
 import requests
 from hashlib import sha256
 import hmac
@@ -61,11 +61,17 @@ def xor(s1, s2):
 BASEURL = "http://127.0.0.1:9000/"
 #BASEURL = "https://idp.dev.lcip.org/"
 
+class WebError(Exception):
+    def __init__(self, r):
+        self.r = r
+        self.args = (r, r.content)
+
 def GET(api, versioned="v1/"):
     url = BASEURL+versioned+api
     print "GET", url
     r = requests.get(url)
-    assert r.status_code == 200, (r, r.content)
+    if r.status_code != 200:
+        raise WebError(r)
     return r.json()
 
 def POST(api, body={}, versioned="v1/"):
@@ -74,7 +80,8 @@ def POST(api, body={}, versioned="v1/"):
     r = requests.post(url,
                       headers={"content-type": "application/json"},
                       data=json.dumps(body))
-    assert r.status_code == 200, (r, r.content)
+    if r.status_code != 200:
+        raise WebError(r)
     return r.json()
 
 from hawk import client as hawk_client
@@ -89,7 +96,8 @@ def HAWK_GET(api, id, key, versioned="v1/"):
     header = hawk_client.header(url, "GET", {"credentials": creds,
                                              "ext": ""})
     r = requests.get(url, headers={"authorization": header["field"]})
-    assert r.status_code == 200, (r, r.content)
+    if r.status_code != 200:
+        raise WebError(r)
     return r.json()
 
 def HAWK_POST(api, id, key, body_object, versioned="v1/"):
@@ -108,7 +116,8 @@ def HAWK_POST(api, id, key, body_object, versioned="v1/"):
     r = requests.post(url, headers={"authorization": header["field"],
                                     "content-type": "application/json"},
                       data=body)
-    assert r.status_code == 200, (r, r.content)
+    if r.status_code != 200:
+        raise WebError(r)
     return r.json()
 
 def processAuthToken(authToken):
@@ -210,6 +219,30 @@ def mainKDF(stretchedPW, mainKDFSalt):
                                      CTXinfo=KW("mainKDF"),
                                      dkLen=2*32))
     return (srpPW, unwrapBKey)
+
+def signCertificate(sessionToken, pubkey, duration):
+    tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
+    resp = HAWK_POST("certificate/sign", tokenID, reqHMACkey,
+                     {"publicKey": pubkey, "duration": duration})
+    assert resp["err"] is None
+    return str(resp["cert"])
+
+def b64parse(s_ascii):
+    s_ascii += "="*((4 - len(s_ascii)%4)%4)
+    return base64.urlsafe_b64decode(s_ascii)
+
+def dumpCert(cert):
+    pieces = cert.split(".")
+    header = json.loads(b64parse(pieces[0]))
+    payload = json.loads(b64parse(pieces[1]))
+    print "header:", header
+    print "payload:", payload
+    return header, payload
+
+def destroySession(sessionToken):
+    tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
+    return HAWK_POST("session/destroy", tokenID, reqHMACkey, {})
+
 
 # https://github.com/mozilla/picl-gherkin/issues/33
 MANGLE = False
@@ -327,7 +360,31 @@ def main():
         kA,kB = getKeys(keyFetchToken, unwrapBKey)
         printhex("kA", kA)
         printhex("kB", kB)
-        # TODO: exercise /certificate/sign
+        # exercise /certificate/sign . jwcrypto in the server demands that
+        # "n" be of a recognized length (512 bits is the shortest it likes)
+        pubkey = {"algorithm": "RS",
+                  "n": "%d" % (2**512), "e": "2"}
+        cert = signCertificate(sessionToken, pubkey, 24*3600*1000)
+        print "cert:", cert
+        header, payload = dumpCert(cert)
+        assert header["alg"] == "RS256"
+        # MANGLED
+        #assert payload["principal"]["email"] == mangled_email
+        assert payload["principal"]["email"] == mangled_email.encode("hex")
+        # exercise /session/destroy
+        print "destroying session now"
+        print destroySession(sessionToken)
+        print "session destroyed, this getEmailStatus should fail:"
+        # check that the session is really gone
+        try:
+            getEmailStatus(sessionToken)
+        except WebError as e:
+            assert e.r.status_code == 401
+            print e.r.content
+            print " good, session really destroyed"
+        else:
+            print "bad, session not destroyed"
+            assert 0
 
     if command == "changepw":
         keyFetchToken, accountResetToken = changePassword(authToken)
@@ -396,4 +453,30 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# exercised:
+#  account/create
+#  NO: account/devices (might not even be implemented)
+#  account/keys
+#  account/reset
+#  account/destroy
+#
+#  auth/start
+#  auth/finish
+#
+#  session/create
+#  session/destroy
+
+#  recovery_email/status
+#  NO: recovery_email/resend_code
+#  NO: recovery_email/verify_code
+#
+#  certificate/sign
+
+#  password/change/start
+#  password/forgot/send_code
+#  NO: password/forgot/resend_code
+#  NO: password/forgot/verify_code
+
+#  NO: get_random_bytes
 
