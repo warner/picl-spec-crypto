@@ -58,8 +58,9 @@ def xor(s1, s2):
     assert len(s1) == len(s2)
     return b"".join([int2byte(ord(s1[i:i+1])^ord(s2[i:i+1])) for i in range(len(s1))])
 
-BASEURL = "http://127.0.0.1:9000/"
-#BASEURL = "https://idp.dev.lcip.org/"
+#BASEURL = "http://127.0.0.1:9000/"
+BASEURL = "https://api-accounts.dev.lcip.org/"
+#BASEURL = "https://api-accounts-latest.dev.lcip.org/"
 
 class WebError(Exception):
     def __init__(self, r):
@@ -143,7 +144,7 @@ def createSession(authToken):
     assert respMAC2 == respMAC, (respMAC2.encode("hex"),
                                  respMAC.encode("hex"))
     keyFetchToken, sessionToken = split(xor(ct, respXORkey))
-    return keyFetchToken, sessionToken
+    return str(r["uid"]), keyFetchToken, sessionToken
 
 def processSessionToken(sessionToken):
     x = HKDF(SKM=sessionToken,
@@ -383,7 +384,7 @@ def main():
         assert False
 
     if command == "login":
-        keyFetchToken, sessionToken = createSession(authToken)
+        uid, keyFetchToken, sessionToken = createSession(authToken)
         printhex("keyFetchToken", keyFetchToken)
         printhex("sessionToken", sessionToken)
         email_status = getEmailStatus(sessionToken)
@@ -400,8 +401,9 @@ def main():
         header, payload = dumpCert(cert)
         assert header["alg"] == "RS256"
         # MANGLED
-        assert payload["principal"]["email"] == mangled_email
+        #assert payload["principal"]["email"] == mangled_email, (payload["principal"]["email"], mangled_email)
         #assert payload["principal"]["email"] == mangled_email.encode("hex")
+        assert payload["principal"]["email"] == "%s@api-accounts.dev.lcip.org" % uid
         # exercise /session/destroy
         print "destroying session now"
         print destroySession(sessionToken)
