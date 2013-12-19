@@ -4,14 +4,9 @@ import requests
 from hashlib import sha256
 import hmac
 from hkdf import HKDF
-import binascii, time
+import binascii
 import six
 from six import binary_type, print_, int2byte
-import mysrp
-
-# get scrypt-0.6.1 from PyPI, run this with it in your PYTHONPATH
-# https://pypi.python.org/pypi/scrypt/0.6.1
-import scrypt
 
 # PyPI has four candidates for PBKDF2 functionality. We use "simple-pbkdf2"
 # by Armin Ronacher: https://pypi.python.org/pypi/simple-pbkdf2/1.0 . Note
@@ -121,30 +116,21 @@ def HAWK_POST(api, id, key, body_object, versioned="v1/"):
         raise WebError(r)
     return r.json()
 
-def processAuthToken(authToken):
-    x = HKDF(SKM=authToken,
-             dkLen=3*32,
-             XTS=None,
-             CTXinfo=KW("authToken"))
-    tokenID, reqHMACkey, requestKey = split(x)
-    return tokenID, reqHMACkey, requestKey
-
-def createSession(authToken):
-    tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
-    x = HKDF(SKM=requestKey,
-             dkLen=3*32,
-             XTS=None,
-             CTXinfo=KW("session/create"))
-    respHMACkey = x[:32]
-    respXORkey = x[32:]
-    r = HAWK_POST("session/create", tokenID, reqHMACkey, {})
-    bundle = r["bundle"].decode("hex")
-    ct,respMAC = bundle[:-32], bundle[-32:]
-    respMAC2 = HMAC(respHMACkey, ct)
-    assert respMAC2 == respMAC, (respMAC2.encode("hex"),
-                                 respMAC.encode("hex"))
-    keyFetchToken, sessionToken = split(xor(ct, respXORkey))
-    return str(r["uid"]), keyFetchToken, sessionToken
+def stretch(emailUTF8, passwordUTF8, PBKDF2_rounds=1000):
+    quickStretchedPW = pbkdf2_bin(passwordUTF8, KWE("quickStretch", emailUTF8),
+                                  PBKDF2_rounds, keylen=1*32, hashfunc=sha256)
+    printhex("quickStretchedPW", quickStretchedPW)
+    authPW = HKDF(SKM=quickStretchedPW,
+                  XTS="",
+                  CTXinfo=KW("authPW"),
+                  dkLen=1*32)
+    localWrap = HKDF(SKM=quickStretchedPW,
+                     XTS="",
+                     CTXinfo=KW("localWrap"),
+                     dkLen=1*32)
+    printhex("authPW", authPW)
+    printhex("localWrap", localWrap)
+    return authPW, localWrap
 
 def processSessionToken(sessionToken):
     x = HKDF(SKM=sessionToken,
@@ -158,24 +144,13 @@ def getEmailStatus(sessionToken):
     tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
     return HAWK_GET("recovery_email/status", tokenID, reqHMACkey)
 
-def changePassword(authToken):
-    tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
-    x = HKDF(SKM=requestKey,
-             dkLen=3*32,
-             XTS=None,
-             CTXinfo=KW("password/change"))
-    respHMACkey = x[:32]
-    respXORkey = x[32:]
-    r = HAWK_POST("password/change/start", tokenID, reqHMACkey, {})
-    bundle = r["bundle"].decode("hex")
-    ct,respMAC = bundle[:-32], bundle[-32:]
-    respMAC2 = HMAC(respHMACkey, ct)
-    assert respMAC2 == respMAC, (respMAC2.encode("hex"),
-                                 respMAC.encode("hex"))
-    keyFetchToken, accountResetToken = split(xor(ct, respXORkey))
-    return keyFetchToken, accountResetToken
+def makeUnwrapBKey(localWrap, stretchWrap):
+    return HKDF(SKM=localWrap+stretchWrap,
+                XTS="",
+                CTXinfo=KW("unwrapBkey"),
+                dkLen=1*32)
 
-def getKeys(keyFetchToken, unwrapBKey):
+def fetchKeys(keyFetchToken, localWrap, stretchWrap):
     x = HKDF(SKM=keyFetchToken,
              dkLen=3*32,
              XTS=None,
@@ -194,32 +169,40 @@ def getKeys(keyFetchToken, unwrapBKey):
     assert respMAC2 == respMAC, (respMAC2.encode("hex"),
                                  respMAC.encode("hex"))
     kA, wrapKB = split(xor(ct, respXORkey))
+    unwrapBKey = makeUnwrapBKey(localWrap, stretchWrap)
     kB = xor(unwrapBKey, wrapKB)
     return kA, kB
 
-def stretch(emailUTF8, passwordUTF8,
-            PBKDF2_rounds_1,
-            scrypt_N, scrypt_r, scrypt_p,
-            PBKDF2_rounds_2):
-    k1 = pbkdf2_bin(passwordUTF8, KWE("first-PBKDF", emailUTF8),
-                    PBKDF2_rounds_1, keylen=1*32, hashfunc=sha256)
-    time_k1 = time.time()
-    printhex("K1", k1)
-    k2 = scrypt.hash(k1, KW("scrypt"),
-                     N=scrypt_N, r=scrypt_r, p=scrypt_p, buflen=1*32)
-    time_k2 = time.time()
-    printhex("K2", k2)
-    stretchedPW = pbkdf2_bin(k2+passwordUTF8, KWE("second-PBKDF", emailUTF8),
-                             PBKDF2_rounds_2, keylen=1*32, hashfunc=sha256)
-    printhex("stretchedPW", stretchedPW)
-    return stretchedPW
+def processChangePasswordToken(changePasswordToken):
+    x = HKDF(SKM=changePasswordToken,
+             dkLen=2*32,
+             XTS=None,
+             CTXinfo=KW("changePasswordToken"))
+    tokenID, reqHMACkey = split(x)
+    return tokenID, reqHMACkey
 
-def mainKDF(stretchedPW, mainKDFSalt):
-    (srpPW, unwrapBKey) = split(HKDF(SKM=stretchedPW,
-                                     XTS=mainKDFSalt,
-                                     CTXinfo=KW("mainKDF"),
-                                     dkLen=2*32))
-    return (srpPW, unwrapBKey)
+def changePassword(emailUTF8, oldPassword, newPassword):
+    oldAuthPW, oldLocalWrap = stretch(emailUTF8, oldPassword)
+    newAuthPW, newLocalWrap = stretch(emailUTF8, newPassword)
+    r = POST("password/change/start",
+             {"email": emailUTF8.encode("hex"),
+              "oldAuthPW": oldAuthPW.encode("hex"),
+              "newAuthPW": newAuthPW.encode("hex"),
+              })
+    print r
+    oldStretchWrap = r["oldStretchWrap"].decode("hex")
+    newStretchWrap = r["newStretchWrap"].decode("hex")
+    keyFetchToken = r["keyFetchToken"].decode("hex")
+    passwordChangeToken = r["passwordChangeToken"].decode("hex")
+    kA, kB = fetchKeys(keyFetchToken, oldLocalWrap, oldStretchWrap)
+    newWrapKB = xor(kB, makeUnwrapBKey(newLocalWrap, newStretchWrap))
+    tokenID, reqHMACkey = processChangePasswordToken(passwordChangeToken)
+    r = HAWK_POST("password/change/finish", tokenID, reqHMACkey,
+                  {"newWrapKB": newWrapKB.encode("hex"),
+                   })
+    print r
+    assert r == {}, r
+    print "password changed"
 
 def signCertificate(sessionToken, pubkey, duration):
     tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
@@ -264,134 +247,104 @@ def verifyForgotPassword(forgotPasswordToken, code):
                   {"code": code})
     return r["accountResetToken"]
 
-# https://github.com/mozilla/picl-gherkin/issues/33
-MANGLE = False
-
 def main():
-    emailUTF8, passwordUTF8, command = sys.argv[1:4]
-    assert command in ("create", "login", "changepw", "destroy",
-                       "forgotpw1", "forgotpw2", "forgotpw3")
-    assert isinstance(emailUTF8, binary_type)
-    printhex("email", emailUTF8)
-    printhex("password", passwordUTF8)
-
     GET("__heartbeat__", versioned="")
+    command = sys.argv[1]
+    if command in ("create", "login", "login-with-keys", "destroy"):
+        emailUTF8, passwordUTF8 = sys.argv[2:4]
+        printhex("email", emailUTF8)
+        printhex("password", passwordUTF8)
+    elif command == "change-password":
+        emailUTF8, oldPasswordUTF8, newPasswordUTF8 = sys.argv[2:5]
+    elif command == "forgotpw-send":
+        emailUTF8 = sys.argv[2]
+    elif command == "forgotpw-resend":
+        emailUTF8, forgotPasswordToken_hex = sys.argv[2:4]
+        forgotPasswordToken = forgotPasswordToken_hex.decode("hex")
+    elif command == "forgotpw-submit":
+        emailUTF8,forgotPasswordToken_hex,code,newPasswordUTF8 = sys.argv[2:6]
+        forgotPasswordToken = forgotPasswordToken_hex.decode("hex")
+    else:
+        raise NotImplementedError("unknown command '%s'" % command)
 
-    if command == "forgotpw1":
+    assert isinstance(emailUTF8, binary_type)
+
+
+    if command == "forgotpw-send":
         r = POST("password/forgot/send_code",
                  {"email": emailUTF8.encode("hex")})
         print r
         forgotPasswordToken = r["forgotPasswordToken"]
         return
 
-    if command == "forgotpw2":
-        forgotPasswordToken = sys.argv[4]
+    if command == "forgotpw-resend":
         r = resendForgotPassword(forgotPasswordToken, emailUTF8)
         print r
         return
 
-    if command == "forgotpw3":
-        forgotPasswordToken, code, new_passwordUTF8 = sys.argv[4:7]
+    if command == "forgotpw-submit":
+        newAuthPW, newLocalWrap = stretch(emailUTF8, newPasswordUTF8)
         accountResetToken = verifyForgotPassword(forgotPasswordToken, code)
-        kA,kB = None, None
+        x = HKDF(SKM=accountResetToken,
+                 XTS=None,
+                 CTXinfo=KW("accountResetToken"),
+                 dkLen=2*32)
+        tokenID, reqHMACkey = split(x)
+        r = HAWK_POST("account/reset", tokenID, reqHMACkey,
+                      {"newAuthPW": newAuthPW.encode("hex"),
+                       })
+        print r
+        assert r == {}, r
+        return
+
+    assert command in ("create", "login", "login-with-key", "destroy")
+
+    authPW, localWrap = stretch(emailUTF8, passwordUTF8)
 
     if command == "create":
-        mainKDFSalt = makeRandom()
-        srpSalt = makeRandom()
-        PBKDF2_rounds_1 = PBKDF2_rounds_2 = 20*1000
-        scrypt_N = 64*1024
-        scrypt_r = 8
-        scrypt_p = 1
-    elif command in ("login", "changepw", "destroy"):
-        r = POST("auth/start",
-                 {"email": emailUTF8.encode("hex")
-                  })
-        print "auth/start", r
-        st = r["passwordStretching"]
-        assert st["type"] == "PBKDF2/scrypt/PBKDF2/v1"
-        mainKDFSalt = st["salt"].decode("hex")
-        PBKDF2_rounds_1 = st["PBKDF2_rounds_1"]
-        PBKDF2_rounds_2 = st["PBKDF2_rounds_2"]
-        scrypt_N = st["scrypt_N"]
-        scrypt_r = st["scrypt_r"]
-        scrypt_p = st["scrypt_p"]
-
-        srpToken = r["srpToken"]
-        srpSalt = r["srp"]["salt"].decode("hex")
-        B = r["srp"]["B"].decode("hex")
-    else:
-        assert False
-
-    printhex("mainKDFSalt", mainKDFSalt)
-    printhex("srpSalt", srpSalt)
-
-    # MANGLE
-    mangled_email = emailUTF8.encode("hex") if MANGLE else emailUTF8
-    stretchedPW = stretch(mangled_email, passwordUTF8, PBKDF2_rounds_1,
-                          scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
-
-    (srpPW, unwrapBKey) = mainKDF(stretchedPW, mainKDFSalt)
-    mangled_srpPW = srpPW.encode("hex") if MANGLE else srpPW
-
-    if command == "create":
-
-        (srpVerifier, _, _, _, _) = mysrp.create_verifier(mangled_email,
-                                                          mangled_srpPW,
-                                                          srpSalt)
         r = POST("account/create",
                  {"email": emailUTF8.encode("hex"),
-                  "srp": {
-                      "type": "SRP-6a/SHA256/2048/v1",
-                      "verifier": srpVerifier.encode("hex"),
-                      "salt": srpSalt.encode("hex"),
-                    },
-                  "passwordStretching": {
-                      "type": "PBKDF2/scrypt/PBKDF2/v1",
-                      "PBKDF2_rounds_1": PBKDF2_rounds_1,
-                      "scrypt_N": scrypt_N,
-                      "scrypt_r": scrypt_r,
-                      "scrypt_p": scrypt_p,
-                      "PBKDF2_rounds_2": PBKDF2_rounds_2,
-                      "salt": mainKDFSalt.encode("hex"),
-                      },
+                  "authPW": authPW.encode("hex"),
                   })
         print r
-    elif command in ("login", "changepw", "destroy"):
-        srpClient = mysrp.Client()
-        A = srpClient.one()
-        M1 = srpClient.two(B, srpSalt, mangled_email, mangled_srpPW)
-        r = POST("auth/finish",
-                 {"srpToken": srpToken,
-                  "A": A.encode("hex"),
-                  "M": M1.encode("hex")})
-        print "auth/finish:", r
-        bundle = r["bundle"].decode("hex")
-        print "bundlelen", len(bundle)
+        return
 
-        x = HKDF(SKM=srpClient.get_key(),
-                 dkLen=2*32,
-                 XTS=None,
-                 CTXinfo=KW("auth/finish"))
-        respHMACkey = x[0:32]
-        respXORkey = x[32:]
-        ct,respMAC = bundle[:-32], bundle[-32:]
-        respMAC2 = HMAC(respHMACkey, ct)
-        assert respMAC2 == respMAC, (respMAC2.encode("hex"),
-                                     respMAC.encode("hex"))
-        authToken = xor(ct, respXORkey)
-        printhex("authToken", authToken)
-    else:
-        assert False
+    if command == "destroy":
+        r = POST("account/destroy",
+                 {"email": emailUTF8.encode("hex"),
+                  "authPW": authPW.encode("hex"),
+                  })
+        print r
+        return
 
-    if command == "login":
-        uid, keyFetchToken, sessionToken = createSession(authToken)
+    if command == "change-password":
+        newPasswordUTF8 = sys.argv[4]
+        return changePassword(emailUTF8, passwordUTF8, newPasswordUTF8)
+
+    assert command in ("login", "login-with-keys")
+    getKeys = bool(command == "login-with-keys")
+
+    r = POST("account/login_and_get_keys" if getKeys else "account/login",
+             {"email": emailUTF8.encode("hex"),
+              "authPW": authPW.encode("hex"),
+              })
+    uid = str(r["uid"])
+    sessionToken = r["sessionToken"].decode("hex")
+    printhex("sessionToken", sessionToken)
+    if getKeys:
+        keyFetchToken = r["keyFetchToken"].decode("hex")
+        stretchWrap = r["stretchWrap"].decode("hex")
         printhex("keyFetchToken", keyFetchToken)
-        printhex("sessionToken", sessionToken)
-        email_status = getEmailStatus(sessionToken)
-        print "email status:", email_status
-        kA,kB = getKeys(keyFetchToken, unwrapBKey)
+        printhex("stretchWrap", stretchWrap)
+
+    email_status = getEmailStatus(sessionToken)
+    print "email status:", email_status
+    if email_status and getKeys:
+        kA,kB = fetchKeys(keyFetchToken, localWrap, stretchWrap)
         printhex("kA", kA)
         printhex("kB", kB)
+
+    if email_status:
         # exercise /certificate/sign . jwcrypto in the server demands that
         # "n" be of a recognized length (512 bits is the shortest it likes)
         pubkey = {"algorithm": "RS",
@@ -400,93 +353,21 @@ def main():
         print "cert:", cert
         header, payload = dumpCert(cert)
         assert header["alg"] == "RS256"
-        # MANGLED
-        #assert payload["principal"]["email"] == mangled_email, (payload["principal"]["email"], mangled_email)
-        #assert payload["principal"]["email"] == mangled_email.encode("hex")
         assert payload["principal"]["email"] == "%s@api-accounts.dev.lcip.org" % uid
-        # exercise /session/destroy
-        print "destroying session now"
-        print destroySession(sessionToken)
-        print "session destroyed, this getEmailStatus should fail:"
-        # check that the session is really gone
-        try:
-            getEmailStatus(sessionToken)
-        except WebError as e:
-            assert e.r.status_code == 401
-            print e.r.content
-            print " good, session really destroyed"
-        else:
-            print "bad, session not destroyed"
-            assert 0
-
-    if command == "changepw":
-        keyFetchToken, accountResetToken = changePassword(authToken)
-        printhex("keyFetchToken", keyFetchToken)
-        printhex("accountResetToken", accountResetToken)
-        kA,kB = getKeys(keyFetchToken, unwrapBKey)
-        printhex("kA", kA)
-        printhex("kB", kB)
-        new_passwordUTF8 = sys.argv[4]
-
-    if command in ("changepw", "forgotpw3"):
-        # stretch new password
-        new_stretchedPW = stretch(emailUTF8, new_passwordUTF8, PBKDF2_rounds_1,
-                                  scrypt_N, scrypt_r, scrypt_p, PBKDF2_rounds_2)
-        new_mainKDFSalt = makeRandom()
-        new_srpSalt = makeRandom()
-        (new_srpPW, new_unwrapBKey) = mainKDF(new_stretchedPW, new_mainKDFSalt)
-        # build new srpVerifier
-        (new_srpVerifier, _,_,_,_) = mysrp.create_verifier(emailUTF8,
-                                                           new_srpPW,
-                                                           new_srpSalt)
-        assert len(new_srpVerifier) == 256, len(new_srpVerifier)
-        printhex("new_srpVerifier", new_srpVerifier)
-        if kB:
-            # re-wrap kB
-            new_wrap_kB = xor(kB, new_unwrapBKey)
-            printhex("new_wrap_kB", new_wrap_kB)
-        else:
-            new_wrap_kB = "\x00"*len(new_unwrapBKey)
-
-        # submit /account/reset
-        x = HKDF(SKM=accountResetToken,
-                 XTS=None,
-                 CTXinfo=KW("accountResetToken"),
-                 dkLen=3*32)
-        tokenID, reqHMACkey1, requestKey = split(x)
-        plaintext = new_wrap_kB+new_srpVerifier
-        print "LEN PLAIN", len(plaintext)
-        y = HKDF(SKM=requestKey,
-                 XTS=None,
-                 CTXinfo=KW("account/reset"),
-                 dkLen=32+len(plaintext))
-        reqHMACkey2 = y[:32]
-        reqXORkey = y[32:]
-        bundle = xor(reqXORkey, plaintext)
-        bundle_mac = HMAC(reqHMACkey2, bundle)
-        payload = {"bundle": (bundle+bundle_mac).encode("hex"),
-                   "srp": {
-                       "type": "SRP-6a/SHA256/2048/v1",
-                       "salt": new_srpSalt.encode("hex"),
-                       },
-                   "passwordStretching": {
-                       "type": "PBKDF2/scrypt/PBKDF2/v1",
-                       "PBKDF2_rounds_1": PBKDF2_rounds_1,
-                       "scrypt_N": scrypt_N,
-                       "scrypt_r": scrypt_r,
-                       "scrypt_p": scrypt_p,
-                       "PBKDF2_rounds_2": PBKDF2_rounds_2,
-                       "salt": new_mainKDFSalt.encode("hex"),
-                       },
-                   }
-        r = HAWK_POST("account/reset", tokenID, reqHMACkey1, payload)
-        assert r == {}, r
-        print "password changed"
-
-    if command == "destroy":
-        tokenID, reqHMACkey, requestKey = processAuthToken(authToken)
-        r = HAWK_POST("account/destroy", tokenID, reqHMACkey, {})
-        print r
+    # exercise /session/destroy
+    print "destroying session now"
+    print destroySession(sessionToken)
+    print "session destroyed, this getEmailStatus should fail:"
+    # check that the session is really gone
+    try:
+        getEmailStatus(sessionToken)
+    except WebError as e:
+        assert e.r.status_code == 401
+        print e.r.content
+        print " good, session really destroyed"
+    else:
+        print "bad, session not destroyed"
+        assert 0
 
 if __name__ == '__main__':
     main()
@@ -498,22 +379,20 @@ if __name__ == '__main__':
 #  account/reset
 #  account/destroy
 #
-#  auth/start
-#  auth/finish
+#  account/login
 #
-#  session/create
 #  session/destroy
-
+#
 #  recovery_email/status
 #  NO: recovery_email/resend_code
 #  NO: recovery_email/verify_code
 #
 #  certificate/sign
-
+#
 #  password/change/start
+#  password/change/finish
 #  password/forgot/send_code
-#  NO: password/forgot/resend_code
-#  NO: password/forgot/verify_code
-
+#  password/forgot/resend_code
+#  password/forgot/verify_code
+#
 #  NO: get_random_bytes
-
