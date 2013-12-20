@@ -177,7 +177,7 @@ def processChangePasswordToken(changePasswordToken):
     x = HKDF(SKM=changePasswordToken,
              dkLen=2*32,
              XTS=None,
-             CTXinfo=KW("changePasswordToken"))
+             CTXinfo=KW("passwordChangeToken"))
     tokenID, reqHMACkey = split(x)
     return tokenID, reqHMACkey
 
@@ -198,7 +198,7 @@ def changePassword(emailUTF8, oldPassword, newPassword):
     newWrapKB = xor(kB, makeUnwrapBKey(newLocalWrap, newStretchWrap))
     tokenID, reqHMACkey = processChangePasswordToken(passwordChangeToken)
     r = HAWK_POST("password/change/finish", tokenID, reqHMACkey,
-                  {"newWrapKB": newWrapKB.encode("hex"),
+                  {"wrapKb": newWrapKB.encode("hex"),
                    })
     print r
     assert r == {}, r
