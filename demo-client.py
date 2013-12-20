@@ -53,8 +53,8 @@ def xor(s1, s2):
     assert len(s1) == len(s2)
     return b"".join([int2byte(ord(s1[i:i+1])^ord(s2[i:i+1])) for i in range(len(s1))])
 
-#BASEURL = "http://127.0.0.1:9000/"
-BASEURL = "https://api-accounts.dev.lcip.org/"
+(BASEURL,HOST) = "http://127.0.0.1:9000/", "127.0.0.1:9000"
+#(BASEURL,HOST) = "https://api-accounts.dev.lcip.org/", "api-accounts.dev.lcip.org"
 #BASEURL = "https://api-accounts-latest.dev.lcip.org/"
 
 class WebError(Exception):
@@ -255,7 +255,7 @@ def main():
         printhex("email", emailUTF8)
         printhex("password", passwordUTF8)
     elif command == "change-password":
-        emailUTF8, oldPasswordUTF8, newPasswordUTF8 = sys.argv[2:5]
+        emailUTF8, passwordUTF8, newPasswordUTF8 = sys.argv[2:5]
     elif command == "forgotpw-send":
         emailUTF8 = sys.argv[2]
     elif command == "forgotpw-resend":
@@ -268,7 +268,6 @@ def main():
         raise NotImplementedError("unknown command '%s'" % command)
 
     assert isinstance(emailUTF8, binary_type)
-
 
     if command == "forgotpw-send":
         r = POST("password/forgot/send_code",
@@ -297,7 +296,8 @@ def main():
         assert r == {}, r
         return
 
-    assert command in ("create", "login", "login-with-key", "destroy")
+    assert command in ("create", "login", "login-with-keys", "destroy",
+                       "change-password")
 
     authPW, localWrap = stretch(emailUTF8, passwordUTF8)
 
@@ -307,6 +307,7 @@ def main():
                   "authPW": authPW.encode("hex"),
                   })
         print r
+        print "Now use the 'curl' command from the server logs to verify"
         return
 
     if command == "destroy":
@@ -353,7 +354,7 @@ def main():
         print "cert:", cert
         header, payload = dumpCert(cert)
         assert header["alg"] == "RS256"
-        assert payload["principal"]["email"] == "%s@api-accounts.dev.lcip.org" % uid
+        assert payload["principal"]["email"] == "%s@%s" % (uid, HOST)
     # exercise /session/destroy
     print "destroying session now"
     print destroySession(sessionToken)
