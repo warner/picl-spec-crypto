@@ -185,7 +185,7 @@ def changePassword(emailUTF8, oldPassword, newPassword):
     oldAuthPW, oldLocalWrap = stretch(emailUTF8, oldPassword)
     newAuthPW, newLocalWrap = stretch(emailUTF8, newPassword)
     r = POST("password/change/start",
-             {"email": emailUTF8.encode("hex"),
+             {"email": emailUTF8,
               "oldAuthPW": oldAuthPW.encode("hex"),
               "newAuthPW": newAuthPW.encode("hex"),
               })
@@ -231,7 +231,7 @@ def processForgotPasswordToken(forgotPasswordToken):
     x = HKDF(SKM=forgotPasswordToken,
              dkLen=2*32,
              XTS=None,
-             CTXinfo=KW("forgotPasswordToken")) # XXX: ???
+             CTXinfo=KW("forgotPasswordToken"))
     # not listed in KeyServerProtocol document
     tokenID, reqHMACkey = split(x)
     return tokenID, reqHMACkey
@@ -239,13 +239,13 @@ def processForgotPasswordToken(forgotPasswordToken):
 def resendForgotPassword(forgotPasswordToken, emailUTF8):
     tokenID, reqHMACkey = processForgotPasswordToken(forgotPasswordToken)
     return HAWK_POST("password/forgot/resend_code", tokenID, reqHMACkey,
-                     {"email": emailUTF8.encode("hex")})
+                     {"email": emailUTF8})
 
 def verifyForgotPassword(forgotPasswordToken, code):
     tokenID, reqHMACkey = processForgotPasswordToken(forgotPasswordToken)
     r = HAWK_POST("password/forgot/verify_code", tokenID, reqHMACkey,
                   {"code": code})
-    return r["accountResetToken"]
+    return r["accountResetToken"].decode("hex")
 
 def main():
     GET("__heartbeat__", versioned="")
@@ -271,7 +271,7 @@ def main():
 
     if command == "forgotpw-send":
         r = POST("password/forgot/send_code",
-                 {"email": emailUTF8.encode("hex")})
+                 {"email": emailUTF8})
         print r
         forgotPasswordToken = r["forgotPasswordToken"]
         return
@@ -290,7 +290,7 @@ def main():
                  dkLen=2*32)
         tokenID, reqHMACkey = split(x)
         r = HAWK_POST("account/reset", tokenID, reqHMACkey,
-                      {"newAuthPW": newAuthPW.encode("hex"),
+                      {"authPW": newAuthPW.encode("hex"),
                        })
         print r
         assert r == {}, r
@@ -303,7 +303,7 @@ def main():
 
     if command == "create":
         r = POST("account/create",
-                 {"email": emailUTF8.encode("hex"),
+                 {"email": emailUTF8,
                   "authPW": authPW.encode("hex"),
                   })
         print r
@@ -312,7 +312,7 @@ def main():
 
     if command == "destroy":
         r = POST("account/destroy",
-                 {"email": emailUTF8.encode("hex"),
+                 {"email": emailUTF8,
                   "authPW": authPW.encode("hex"),
                   })
         print r
@@ -326,7 +326,7 @@ def main():
     getKeys = bool(command == "login-with-keys")
 
     r = POST("account/login_and_get_keys" if getKeys else "account/login",
-             {"email": emailUTF8.encode("hex"),
+             {"email": emailUTF8,
               "authPW": authPW.encode("hex"),
               })
     uid = str(r["uid"])
