@@ -227,22 +227,22 @@ def destroySession(sessionToken):
     tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
     return HAWK_POST("session/destroy", tokenID, reqHMACkey, {})
 
-def processForgotPasswordToken(forgotPasswordToken):
-    x = HKDF(SKM=forgotPasswordToken,
+def processForgotPasswordToken(passwordForgotToken):
+    x = HKDF(SKM=passwordForgotToken,
              dkLen=2*32,
              XTS=None,
-             CTXinfo=KW("forgotPasswordToken"))
+             CTXinfo=KW("passwordForgotToken"))
     # not listed in KeyServerProtocol document
     tokenID, reqHMACkey = split(x)
     return tokenID, reqHMACkey
 
-def resendForgotPassword(forgotPasswordToken, emailUTF8):
-    tokenID, reqHMACkey = processForgotPasswordToken(forgotPasswordToken)
+def resendForgotPassword(passwordForgotToken, emailUTF8):
+    tokenID, reqHMACkey = processForgotPasswordToken(passwordForgotToken)
     return HAWK_POST("password/forgot/resend_code", tokenID, reqHMACkey,
                      {"email": emailUTF8})
 
-def verifyForgotPassword(forgotPasswordToken, code):
-    tokenID, reqHMACkey = processForgotPasswordToken(forgotPasswordToken)
+def verifyForgotPassword(passwordForgotToken, code):
+    tokenID, reqHMACkey = processForgotPasswordToken(passwordForgotToken)
     r = HAWK_POST("password/forgot/verify_code", tokenID, reqHMACkey,
                   {"code": code})
     return r["accountResetToken"].decode("hex")
@@ -259,11 +259,11 @@ def main():
     elif command == "forgotpw-send":
         emailUTF8 = sys.argv[2]
     elif command == "forgotpw-resend":
-        emailUTF8, forgotPasswordToken_hex = sys.argv[2:4]
-        forgotPasswordToken = forgotPasswordToken_hex.decode("hex")
+        emailUTF8, passwordForgotToken_hex = sys.argv[2:4]
+        passwordForgotToken = passwordForgotToken_hex.decode("hex")
     elif command == "forgotpw-submit":
-        emailUTF8,forgotPasswordToken_hex,code,newPasswordUTF8 = sys.argv[2:6]
-        forgotPasswordToken = forgotPasswordToken_hex.decode("hex")
+        emailUTF8,passwordForgotToken_hex,code,newPasswordUTF8 = sys.argv[2:6]
+        passwordForgotToken = passwordForgotToken_hex.decode("hex")
     else:
         raise NotImplementedError("unknown command '%s'" % command)
 
@@ -273,17 +273,17 @@ def main():
         r = POST("password/forgot/send_code",
                  {"email": emailUTF8})
         print r
-        forgotPasswordToken = r["forgotPasswordToken"]
+        passwordForgotToken = r["passwordForgotToken"]
         return
 
     if command == "forgotpw-resend":
-        r = resendForgotPassword(forgotPasswordToken, emailUTF8)
+        r = resendForgotPassword(passwordForgotToken, emailUTF8)
         print r
         return
 
     if command == "forgotpw-submit":
         newAuthPW, newLocalWrap = stretch(emailUTF8, newPasswordUTF8)
-        accountResetToken = verifyForgotPassword(forgotPasswordToken, code)
+        accountResetToken = verifyForgotPassword(passwordForgotToken, code)
         x = HKDF(SKM=accountResetToken,
                  XTS=None,
                  CTXinfo=KW("accountResetToken"),
