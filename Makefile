@@ -1,11 +1,17 @@
 
 help:
 	@echo "run: make venv deps"
-	@echo "then ./venv/bin/python demo-client.py email@example.org pw create"
-	@echo "then ./venv/bin/python demo-client.py email@example.org pw login"
-	@echo "then ./venv/bin/python demo-client.py email@example.org pw changepw newpw"
-	@echo "then ./venv/bin/python demo-client.py email@example.org newpw login"
-	@echo "then ./venv/bin/python demo-client.py email@example.org newpw destroy"
+	@echo "then ./venv/bin/python demo-client.py create email@example.org pw"
+	@echo " (and click verification email link)"
+	@echo " ./venv/bin/python demo-client.py login email@example.org pw"
+	@echo " ./venv/bin/python demo-client.py login-with-keys email@example.org pw"
+	@echo " ./venv/bin/python demo-client.py change-password email@example.org pw newpw"
+	@echo " forgot-password flow:"
+	@echo "  ./venv/bin/python demo-client.py forgotpw-send email@example.org"
+	@echo "  ./venv/bin/python demo-client.py forgotpw-resend email@example.org token"
+	@echo "  ./venv/bin/python demo-client.py forgotpw-submit email@example.org token code newerpw"
+	@echo " destroy-account flow:"
+	@echo " ./venv/bin/python demo-client.py destroy email@example.org newerpw"
 
 venv:
 	virtualenv venv
