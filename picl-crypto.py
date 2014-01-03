@@ -97,7 +97,7 @@ verifyHash = HKDF(SKM=bigStretchedPW,
 printhex("verifyHash", verifyHash)
 
 kA = fakeKey(1*32)
-wrapkB = fakeKey(2*32)
+wrapwrapkB = fakeKey(2*32)
 authToken = fakeKey(3*32)
 keyFetchToken = fakeKey(4*32)
 sessionToken = fakeKey(5*32)
@@ -105,19 +105,15 @@ accountResetToken = fakeKey(6*32)
 
 if 1:
     printheader("/account/keys")
-    localWrap = HKDF(SKM=quickStretchedPW,
-                     XTS="",
-                     CTXinfo=KW("localWrap"),
-                     dkLen=1*32)
-    printhex("localWrap", localWrap)
 
-    stretchWrap = HKDF(SKM=bigStretchedPW,
+    wrapwrapKey = HKDF(SKM=bigStretchedPW,
                        XTS="",
-                       CTXinfo=KW("stretchWrap"),
+                       CTXinfo=KW("wrapwrapKey"),
                        dkLen=1*32)
-    printhex("stretchWrap", stretchWrap)
+    printhex("wrapwrapKey", wrapwrapKey)
+    wrapkB = xor(wrapwrapKey, wrapwrapkB)
 
-    unwrapBkey = HKDF(SKM=localWrap+stretchWrap,
+    unwrapBkey = HKDF(SKM=quickStretchedPW,
                       XTS="",
                       CTXinfo=KW("unwrapBkey"),
                       dkLen=1*32)
