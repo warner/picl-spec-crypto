@@ -1,5 +1,5 @@
 
-import os, sys, json, base64
+import os, sys, json, base64, urlparse
 import requests
 from hashlib import sha256
 import hmac
@@ -53,9 +53,11 @@ def xor(s1, s2):
     assert len(s1) == len(s2)
     return b"".join([int2byte(ord(s1[i:i+1])^ord(s2[i:i+1])) for i in range(len(s1))])
 
-(BASEURL,HOST) = "http://127.0.0.1:9000/", "127.0.0.1:9000"
-#(BASEURL,HOST) = "https://api-accounts.dev.lcip.org/", "api-accounts.dev.lcip.org"
+#BASEURL = "http://127.0.0.1:9000/"
+BASEURL = "https://api-accounts-onepw.dev.lcip.org/"
 #BASEURL = "https://api-accounts-latest.dev.lcip.org/"
+
+HOST = urlparse.urlparse(BASEURL)[1]
 
 class WebError(Exception):
     def __init__(self, r):
@@ -124,13 +126,13 @@ def stretch(emailUTF8, passwordUTF8, PBKDF2_rounds=1000):
                   XTS="",
                   CTXinfo=KW("authPW"),
                   dkLen=1*32)
-    localWrap = HKDF(SKM=quickStretchedPW,
-                     XTS="",
-                     CTXinfo=KW("localWrap"),
-                     dkLen=1*32)
+    unwrapBKey = HKDF(SKM=quickStretchedPW,
+                      XTS="",
+                      CTXinfo=KW("unwrapBkey"),
+                      dkLen=1*32)
     printhex("authPW", authPW)
-    printhex("localWrap", localWrap)
-    return authPW, localWrap
+    printhex("unwrapBKey", unwrapBKey)
+    return authPW, unwrapBKey
 
 def processSessionToken(sessionToken):
     x = HKDF(SKM=sessionToken,
@@ -144,13 +146,7 @@ def getEmailStatus(sessionToken):
     tokenID, reqHMACkey, requestKey = processSessionToken(sessionToken)
     return HAWK_GET("recovery_email/status", tokenID, reqHMACkey)
 
-def makeUnwrapBKey(localWrap, stretchWrap):
-    return HKDF(SKM=localWrap+stretchWrap,
-                XTS="",
-                CTXinfo=KW("unwrapBkey"),
-                dkLen=1*32)
-
-def fetchKeys(keyFetchToken, localWrap, stretchWrap):
+def fetchKeys(keyFetchToken, unwrapBkey):
     x = HKDF(SKM=keyFetchToken,
              dkLen=3*32,
              XTS=None,
@@ -169,8 +165,7 @@ def fetchKeys(keyFetchToken, localWrap, stretchWrap):
     assert respMAC2 == respMAC, (respMAC2.encode("hex"),
                                  respMAC.encode("hex"))
     kA, wrapKB = split(xor(ct, respXORkey))
-    unwrapBKey = makeUnwrapBKey(localWrap, stretchWrap)
-    kB = xor(unwrapBKey, wrapKB)
+    kB = xor(unwrapBkey, wrapKB)
     return kA, kB
 
 def processChangePasswordToken(changePasswordToken):
@@ -182,23 +177,21 @@ def processChangePasswordToken(changePasswordToken):
     return tokenID, reqHMACkey
 
 def changePassword(emailUTF8, oldPassword, newPassword):
-    oldAuthPW, oldLocalWrap = stretch(emailUTF8, oldPassword)
-    newAuthPW, newLocalWrap = stretch(emailUTF8, newPassword)
+    oldAuthPW, oldunwrapBKey = stretch(emailUTF8, oldPassword)
+    newAuthPW, newunwrapBKey = stretch(emailUTF8, newPassword)
     r = POST("password/change/start",
              {"email": emailUTF8,
               "oldAuthPW": oldAuthPW.encode("hex"),
-              "newAuthPW": newAuthPW.encode("hex"),
               })
     print r
-    oldStretchWrap = r["oldStretchWrap"].decode("hex")
-    newStretchWrap = r["newStretchWrap"].decode("hex")
     keyFetchToken = r["keyFetchToken"].decode("hex")
     passwordChangeToken = r["passwordChangeToken"].decode("hex")
-    kA, kB = fetchKeys(keyFetchToken, oldLocalWrap, oldStretchWrap)
-    newWrapKB = xor(kB, makeUnwrapBKey(newLocalWrap, newStretchWrap))
+    kA, kB = fetchKeys(keyFetchToken, oldunwrapBKey)
+    newWrapKB = xor(kB, newunwrapBKey)
     tokenID, reqHMACkey = processChangePasswordToken(passwordChangeToken)
     r = HAWK_POST("password/change/finish", tokenID, reqHMACkey,
-                  {"wrapKb": newWrapKB.encode("hex"),
+                  {"authPW": newAuthPW.encode("hex"),
+                   "wrapKb": newWrapKB.encode("hex"),
                    })
     print r
     assert r == {}, r
@@ -282,7 +275,7 @@ def main():
         return
 
     if command == "forgotpw-submit":
-        newAuthPW, newLocalWrap = stretch(emailUTF8, newPasswordUTF8)
+        newAuthPW = stretch(emailUTF8, newPasswordUTF8)[0]
         accountResetToken = verifyForgotPassword(passwordForgotToken, code)
         x = HKDF(SKM=accountResetToken,
                  XTS=None,
@@ -299,7 +292,7 @@ def main():
     assert command in ("create", "login", "login-with-keys", "destroy",
                        "change-password")
 
-    authPW, localWrap = stretch(emailUTF8, passwordUTF8)
+    authPW, unwrapBKey = stretch(emailUTF8, passwordUTF8)
 
     if command == "create":
         r = POST("account/create",
@@ -325,7 +318,7 @@ def main():
     assert command in ("login", "login-with-keys")
     getKeys = bool(command == "login-with-keys")
 
-    r = POST("account/login_and_get_keys" if getKeys else "account/login",
+    r = POST("account/login?keys=true" if getKeys else "account/login",
              {"email": emailUTF8,
               "authPW": authPW.encode("hex"),
               })
@@ -334,14 +327,12 @@ def main():
     printhex("sessionToken", sessionToken)
     if getKeys:
         keyFetchToken = r["keyFetchToken"].decode("hex")
-        stretchWrap = r["stretchWrap"].decode("hex")
         printhex("keyFetchToken", keyFetchToken)
-        printhex("stretchWrap", stretchWrap)
 
     email_status = getEmailStatus(sessionToken)
     print "email status:", email_status
     if email_status and getKeys:
-        kA,kB = fetchKeys(keyFetchToken, localWrap, stretchWrap)
+        kA,kB = fetchKeys(keyFetchToken, unwrapBKey)
         printhex("kA", kA)
         printhex("kB", kB)
 
